@@ -1,0 +1,17 @@
+# Spaceships Server Configuration
+# Lines starting with # are comments
+
+# UDP port the server listens on
+SERVER_PORT=9000
+
+# Server tick rate in Hz (how many physics updates per second)
+TICK_RATE=30
+
+# Minimum players required to start a round
+MIN_PLAYERS=2
+
+# Maximum players allowed (capped at 6)
+MAX_PLAYERS=4
+
+# File to persist the top-5 leaderboard
+LEADERBOARD=leaderboard.bin

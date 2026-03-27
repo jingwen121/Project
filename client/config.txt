@@ -1,0 +1,15 @@
+# Spaceships Client Configuration
+# Lines starting with # are comments
+
+# IP address of the server machine on the LAN
+SERVER_IP=127.0.0.1
+
+# Must match SERVER_PORT in server_config.txt
+SERVER_PORT=9000
+
+# Local UDP port this client will bind to
+# Each client on the same machine must use a different port
+CLIENT_PORT=9001
+
+# Your in-game display name (max 15 characters)
+PLAYER_NAME=Player1
