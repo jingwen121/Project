@@ -57,6 +57,55 @@ static std::array<NetBullet, MAX_BULLETS> g_netBullets{};
 static uint8_t g_netPlayerCount = 0;
 static std::mutex g_netStateMtx;
 static std::atomic<int16_t> g_lastAimAngle{0};
+static s8 g_fontId = -1;
+static std::atomic<bool> g_roundOverActive{ false };
+static std::mutex g_roundOverMtx;
+static uint8_t g_roundWinnerCount = 0;
+static std::array<PktScoreUpdate::Entry, MAX_PLAYERS> g_roundWinners{};
+static uint8_t g_roundLeaderboardCount = 0;
+static std::array<LeaderboardEntry, LEADERBOARD_SIZE> g_roundLeaderboard{};
+
+static const char* PlayerColorLabel(uint8_t playerId)
+{
+    switch (playerId)
+    {
+        case 1: return "Red";
+        case 2: return "Green";
+        case 3: return "Blue";
+        case 4: return "White";
+        case 5: return "Cyan";
+        case 6: return "Magenta";
+        default: return "";
+    }
+}
+
+static char ToLowerAscii(char c)
+{
+    if (c >= 'A' && c <= 'Z')
+        return static_cast<char>(c + ('a' - 'A'));
+    return c;
+}
+
+static bool ContainsIgnoreCase(const char* haystack, const char* needle)
+{
+    if (!haystack || !needle || needle[0] == '\0')
+        return false;
+
+    for (const char* h = haystack; *h; ++h)
+    {
+        const char* a = h;
+        const char* b = needle;
+        while (*a && *b && ToLowerAscii(*a) == ToLowerAscii(*b))
+        {
+            ++a;
+            ++b;
+        }
+        if (*b == '\0')
+            return true;
+    }
+
+    return false;
+}
 
 static void SendInput(uint8_t keys);
 static void SendJoin();
@@ -116,6 +165,12 @@ static void CreateRectangleMesh()
 
 static void HandleInputLocal()
 {
+    if (g_roundOverActive.load())
+    {
+        ++g_localTick;
+        return;
+    }
+
     uint8_t keys = 0;
 
     // INPUT_ROTATE_LEFT  → move left
@@ -381,6 +436,48 @@ static void DrawFrame()
     DrawFighters();
     DrawBullets();
 
+    if (g_fontId >= 0 && g_roundOverActive.load())
+    {
+        AEGfxSetBlendMode(AE_GFX_BM_BLEND);
+
+        AEGfxPrint(g_fontId, "ROUND OVER", -0.25f, 0.85f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+
+        std::lock_guard<std::mutex> lock(g_roundOverMtx);
+
+        float y = 0.70f;
+        AEGfxPrint(g_fontId, "Winners", -0.95f, y, 0.7f, 1.0f, 0.9f, 0.2f, 1.0f);
+        y -= 0.10f;
+
+        for (int i = 0; i < static_cast<int>(g_roundWinnerCount) && i < MAX_PLAYERS; ++i)
+        {
+            char line[128]{};
+            uint16_t score = ntohs(g_roundWinners[i].score);
+            const char* color = PlayerColorLabel(g_roundWinners[i].playerId);
+            const bool nameAlreadyHasColor = (color[0] != '\0') && ContainsIgnoreCase(g_roundWinners[i].name, color);
+
+            if (color[0] != '\0' && !nameAlreadyHasColor)
+                std::snprintf(line, sizeof(line), "%d) %s %s - %u", i + 1, g_roundWinners[i].name, color, static_cast<unsigned int>(score));
+            else
+                std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundWinners[i].name, static_cast<unsigned int>(score));
+            AEGfxPrint(g_fontId, line, -0.95f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+            y -= 0.08f;
+        }
+
+        y = 0.70f;
+        AEGfxPrint(g_fontId, "Top 5 All-Time", 0.10f, y, 0.7f, 0.2f, 0.9f, 1.0f, 1.0f);
+        y -= 0.10f;
+
+        for (int i = 0; i < static_cast<int>(g_roundLeaderboardCount) && i < LEADERBOARD_SIZE; ++i)
+        {
+            char line[128]{};
+            std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundLeaderboard[i].name, static_cast<unsigned int>(g_roundLeaderboard[i].score));
+            AEGfxPrint(g_fontId, line, 0.10f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+            y -= 0.08f;
+        }
+
+        AEGfxPrint(g_fontId, "Close the window to exit", -0.30f, -0.95f, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+    }
+
     // Print debug info once after first frame so we can confirm positions
     if (!s_debugPrinted)
     {
@@ -506,6 +603,42 @@ static void RecvThread()
 
             break;
         }
+        case MSG_ROUND_OVER:
+        {
+            if (r < static_cast<int>(sizeof(PktRoundOver)))
+                break;
+
+            PktRoundOver ro{};
+            std::memcpy(&ro, buf, sizeof(PktRoundOver));
+
+            {
+                std::lock_guard<std::mutex> lock(g_roundOverMtx);
+
+                g_roundWinnerCount = ro.winnerCount;
+                for (int i = 0; i < MAX_PLAYERS; ++i)
+                    g_roundWinners[i] = ro.winners[i];
+
+                g_roundLeaderboardCount = ro.leaderboardCount;
+                for (int i = 0; i < LEADERBOARD_SIZE; ++i)
+                    g_roundLeaderboard[i] = ro.leaderboard[i];
+            }
+
+            g_roundOverActive.store(true);
+
+            uint16_t seq = ntohs(ro.hdr.seq);
+            if (seq != SEQ_UNRELIABLE)
+            {
+                PktAck ack{};
+                ack.hdr.type = MSG_ACK;
+                ack.hdr.playerId = g_myId;
+                ack.hdr.seq = htons(SEQ_UNRELIABLE);
+                ack.hdr.timestamp = htonl(g_localTick);
+                ack.ackSeq = htons(seq);
+                SendTo(&ack, sizeof(ack));
+            }
+
+            break;
+        }
         default:
             break;
         }
@@ -582,6 +715,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 
     AESysSetWindowTitle("2-4 Player Fighting Game");
 
+    g_fontId = AEGfxCreateFont("C:\\Windows\\Fonts\\arial.ttf", 24);
+
     CreateRectangleMesh();
     InitPlayers();
     StartNetworking();
@@ -600,6 +735,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
 
     if (g_rectMesh)
         AEGfxMeshFree(g_rectMesh);
+
+    if (g_fontId >= 0)
+        AEGfxDestroyFont(g_fontId);
 
     AESysExit();
     return 0;

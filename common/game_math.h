@@ -80,6 +80,7 @@ constexpr int32_t FIGHTER_JUMP_SPEED_FP  = 14000; // initial jump velocity (upwa
 constexpr int32_t FIGHTER_GRAVITY_FP     = 600;   // gravity applied each tick (downward)
 
 // ── Scoring ──────────────────────────────────────────────────────────────────
+constexpr uint16_t SCORE_PLAYER_KILL     = 200;
 constexpr uint16_t SCORE_LARGE_ASTEROID  = 20;
 constexpr uint16_t SCORE_MEDIUM_ASTEROID = 50;
 constexpr uint16_t SCORE_SMALL_ASTEROID  = 100;

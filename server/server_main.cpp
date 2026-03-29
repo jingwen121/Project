@@ -471,7 +471,16 @@ static void CheckBulletPlayerCollisions() {
                     Broadcast(&pkt, sizeof(pkt));
 
                     if (g_phase == GamePhase::PLAYING)
+                    {
+                        for (auto& k : g_players) {
+                            if (k.connected && k.id == bullet.ownerId) {
+                                k.score = static_cast<uint16_t>(k.score + SCORE_PLAYER_KILL);
+                                break;
+                            }
+                        }
+
                         EndRound();
+                    }
                     return;
                 }
 
@@ -666,7 +675,25 @@ static void HandleJoin(const PktJoin& pkt, const sockaddr_in& from) {
     int count = CountConnected();
     slot->id = newId;
     slot->addr = from;
-    strncpy_s(slot->name, sizeof(slot->name), pkt.name, _TRUNCATE);
+
+    const char* color = "White";
+    switch (newId) {
+        case 1: color = "Red"; break;
+        case 2: color = "Green"; break;
+        case 3: color = "Blue"; break;
+        case 4: color = "White"; break;
+        case 5: color = "Cyan"; break;
+        case 6: color = "Magenta"; break;
+        default: break;
+    }
+
+    if (pkt.name[0] == '\0' || strcmp(pkt.name, "Player") == 0) {
+        std::snprintf(slot->name, sizeof(slot->name), "Player %s", color);
+    }
+    else {
+        strncpy_s(slot->name, sizeof(slot->name), pkt.name, _TRUNCATE);
+    }
+
     slot->connected = true;
     slot->alive = (g_phase == GamePhase::PLAYING);
     slot->health = PLAYER_MAX_HEALTH;

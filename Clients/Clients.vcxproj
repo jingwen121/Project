@@ -115,6 +115,7 @@
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <TreatWarningAsError>false</TreatWarningAsError>
+      <AdditionalIncludeDirectories>C:\GitHub\Project\lib\AlphaEngine\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -146,14 +147,13 @@ xcopy "$(SolutionDir)lib\AlphaEngine\lib\fmodL.dll"        "$(TargetDir)" /r /y 
       <AdditionalDependencies>Alpha_Engine.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy "$(SolutionDir)Assets\*"
-"$(OutDir)Assets\" /s /r /y /q
-xcopy "$(SolutionDir)lib\AlphaEngine\lib\freetype.dll"
-"$(OutDir)" /s /r /y /q
-"$(SolutionDir)lib\AlphaEngine\lib\Alpha_Engine.dll"
-"$(OutDir)" /s /r /y /q
-"$(SolutionDir)lib\AlphaEngine\lib\fmod.dll"
-"$(OutDir)" /s /r /y /q</Command>
+      <Command>if not exist "$(TargetDir)Assets\" mkdir "$(TargetDir)Assets\"
+
+xcopy "$(SolutionDir)Assets\*" "$(TargetDir)Assets\" /s /r /y /q
+
+xcopy "$(SolutionDir)lib\AlphaEngine\lib\freetype.dll" "$(TargetDir)" /r /y /q
+xcopy "$(SolutionDir)lib\AlphaEngine\lib\Alpha_Engine.dll" "$(TargetDir)" /r /y /q
+xcopy "$(SolutionDir)lib\AlphaEngine\lib\fmod.dll" "$(TargetDir)" /r /y /q</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
