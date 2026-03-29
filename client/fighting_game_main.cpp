@@ -9,6 +9,7 @@
 #include <thread>
 #include <cstring>
 #include <chrono>
+#include <cmath>
 
 struct Fighter
 {
@@ -40,13 +41,22 @@ struct NetPlayer {
     float y;
     uint16_t score;
     uint8_t alive;
+    uint8_t health;
     char name[16];
     bool active;
 };
 
+struct NetBullet {
+    float x;
+    float y;
+    bool  active;
+};
+
 static std::array<NetPlayer, MAX_PLAYERS> g_netPlayers{};
+static std::array<NetBullet, MAX_BULLETS> g_netBullets{};
 static uint8_t g_netPlayerCount = 0;
 static std::mutex g_netStateMtx;
+static std::atomic<int16_t> g_lastAimAngle{0};
 
 static void SendInput(uint8_t keys);
 static void SendJoin();
@@ -122,6 +132,41 @@ static void HandleInputLocal()
     if (AEInputCheckCurr(AEVK_SPACE) || AEInputCheckCurr(AEVK_LBUTTON))
         keys |= INPUT_FIRE;
 
+    int16_t aimAngle = 0;
+    if (g_joined)
+    {
+        s32 mx = 0, my = 0;
+        AEInputGetCursorPosition(&mx, &my);
+
+        float px = 0.0f, py = 0.0f;
+        {
+            std::lock_guard<std::mutex> lock(g_netStateMtx);
+            int idx = (g_myId > 0 && g_myId <= MAX_PLAYERS) ? (g_myId - 1) : 0;
+            px = g_netPlayers[idx].x;
+            py = g_netPlayers[idx].y;
+        }
+
+        float winW = 1200.0f;
+        float winH = 720.0f;
+        float nx = static_cast<float>(mx) / winW;
+        float ny = static_cast<float>(my) / winH;
+        float mxWorld = nx * static_cast<float>(WORLD_W);
+        float myWorld = (1.0f - ny) * static_cast<float>(WORLD_H);
+
+        float dx = mxWorld - px;
+        float dy = myWorld - py;
+        if (dx != 0.0f || dy != 0.0f)
+        {
+            float angRad = std::atan2(dy, dx);
+            float angDeg = angRad * 180.0f / 3.14159265f;
+            if (angDeg < 0.0f)
+                angDeg += 360.0f;
+            aimAngle = static_cast<int16_t>(angDeg * 10.0f);
+        }
+    }
+
+    g_lastAimAngle.store(aimAngle);
+
     if (g_joined && g_sock != INVALID_SOCKET)
         SendInput(keys);
 
@@ -188,7 +233,7 @@ static void SyncFightersFromNet()
 
         f.x = minX + nx * width;
         f.y = minY + ny * height;
-        f.health = np.alive ? 100 : 0;
+        f.health = static_cast<int>(np.health);
         ++activeCount;
     }
 
@@ -270,6 +315,23 @@ static void DrawFighters()
         anyActive = true;
         Fighter& f = g_fighters[i];
         DrawFilledRect(f.x, f.y, width, height, f.color);
+
+        if (f.health > 0)
+        {
+            float hpFrac = static_cast<float>(f.health) / static_cast<float>(PLAYER_MAX_HEALTH);
+            if (hpFrac < 0.0f) hpFrac = 0.0f;
+            if (hpFrac > 1.0f) hpFrac = 1.0f;
+
+            float barHeight = (maxY - minY) * 0.02f;
+            float barY = f.y + height * 0.6f;
+
+            DrawFilledRect(f.x, barY, width, barHeight, 0xFF404040);
+
+            float barFullLeft  = f.x - width * 0.5f;
+            float barCurrWidth = width * hpFrac;
+            float barCurrCenter = barFullLeft + barCurrWidth * 0.5f;
+            DrawFilledRect(barCurrCenter, barY, barCurrWidth, barHeight, 0xFF00FF00);
+        }
     }
 
     if (!anyActive)
@@ -283,6 +345,33 @@ static void DrawFighters()
     }
 }
 
+static void DrawBullets()
+{
+    float minX = AEGfxGetWinMinX();
+    float maxX = AEGfxGetWinMaxX();
+    float minY = AEGfxGetWinMinY();
+    float maxY = AEGfxGetWinMaxY();
+
+    AEGfxSetRenderMode(AE_GFX_RM_COLOR);
+    AEGfxSetBlendMode(AE_GFX_BM_NONE);
+    AEGfxSetTransparency(1.0f);
+
+    float width = (maxX - minX) * 0.015f;
+    float height = (maxY - minY) * 0.04f;
+
+    for (int i = 0; i < MAX_BULLETS; ++i)
+    {
+        if (!g_netBullets[i].active)
+            continue;
+
+        float nx = g_netBullets[i].x / static_cast<float>(WORLD_W);
+        float ny = g_netBullets[i].y / static_cast<float>(WORLD_H);
+        float x = minX + nx * (maxX - minX);
+        float y = minY + ny * (maxY - minY);
+        DrawFilledRect(x, y, width, height, 0xFFFFFF00);
+    }
+}
+
 static void DrawFrame()
 {
     static bool s_debugPrinted = false;
@@ -290,6 +379,7 @@ static void DrawFrame()
     AEGfxSetBackgroundColor(0.05f, 0.05f, 0.1f);
     DrawArena();
     DrawFighters();
+    DrawBullets();
 
     // Print debug info once after first frame so we can confirm positions
     if (!s_debugPrinted)
@@ -333,6 +423,7 @@ static void SendInput(uint8_t keys)
     pkt.hdr.seq      = htons(SEQ_UNRELIABLE);
     pkt.hdr.timestamp = htonl(g_localTick);
     pkt.keys         = keys;
+    pkt.aimAngle     = htons(g_lastAimAngle.load());
     SendTo(&pkt, sizeof(pkt));
 }
 
@@ -382,10 +473,9 @@ static void RecvThread()
             std::lock_guard<std::mutex> lock(g_netStateMtx);
             g_lastServerTick  = ntohl(gs.gameTick);
 
-            // clear actives first
             for (int i = 0; i < MAX_PLAYERS; ++i) g_netPlayers[i].active = false;
+            for (int i = 0; i < MAX_BULLETS; ++i) g_netBullets[i].active = false;
 
-            // server now provides playerId per PlayerState; map by id-1
             for (int i = 0; i < gs.playerCount && i < MAX_PLAYERS; ++i)
             {
                 const PlayerState& ps = gs.players[i];
@@ -396,11 +486,20 @@ static void RecvThread()
                 np.y = static_cast<float>(static_cast<int32_t>(ntohl(ps.y))) / FP_SCALE;
                 np.score = ntohs(ps.score);
                 np.alive = ps.alive;
+                np.health = ps.health;
                 strncpy_s(np.name, sizeof(np.name), ps.name, _TRUNCATE);
                 np.active = true;
             }
 
-            // update active count
+            for (int i = 0; i < gs.bulletCount && i < MAX_BULLETS; ++i)
+            {
+                const BulletState& bs = gs.bullets[i];
+                auto& nb = g_netBullets[i];
+                nb.x = static_cast<float>(static_cast<int32_t>(ntohl(bs.x))) / FP_SCALE;
+                nb.y = static_cast<float>(static_cast<int32_t>(ntohl(bs.y))) / FP_SCALE;
+                nb.active = bs.alive != 0;
+            }
+
             int cnt = 0;
             for (int i = 0; i < MAX_PLAYERS; ++i) if (g_netPlayers[i].active) ++cnt;
             g_netPlayerCount = static_cast<uint8_t>(cnt);

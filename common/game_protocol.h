@@ -129,7 +129,8 @@ constexpr uint8_t INPUT_FIRE         = 0x08;
 
 struct PktInput {
     PktHeader hdr;
-    uint8_t   keys; // bitmask of INPUT_* flags
+    uint8_t   keys;      // bitmask of INPUT_* flags
+    int16_t   aimAngle;  // aim direction in degrees*10 (network byte order)
 };
 
 // ── MSG_ACK ──────────────────────────────────────────────────────────────────
@@ -149,6 +150,7 @@ struct PlayerState {
     uint16_t score;      // current round score  (network byte order)
     uint8_t  alive;      // 1 = alive, 0 = dead/respawning
     uint8_t  lives;
+    uint8_t  health;     // 0-100 fighter health
     char     name[16];
 };
 

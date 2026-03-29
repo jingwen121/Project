@@ -341,6 +341,7 @@ static void SendInput(uint8_t keys) {
     pkt.hdr.seq      = htons(SEQ_UNRELIABLE);
     pkt.hdr.timestamp = htonl(g_localTick);
     pkt.keys         = keys;
+    pkt.aimAngle     = htons(static_cast<int16_t>(g_shipAngle));
     SendTo(&pkt, sizeof(pkt));
 }
 

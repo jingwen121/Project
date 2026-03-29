@@ -55,6 +55,7 @@ struct ServerPlayer {
     uint8_t     id = 0;
     bool        connected = false;
     bool        alive = true;
+    uint8_t     health = PLAYER_MAX_HEALTH;
     int32_t     x = 0, y = 0;
     int16_t     angle = 0;
     int32_t     velX = 0, velY = 0;
@@ -433,6 +434,53 @@ static void EndRound() {
     SendReliable(MSG_ROUND_OVER, &pkt, sizeof(pkt));
 }
 
+// ── Bullet-player collision ───────────────────────────────────────────────────
+static void CheckBulletPlayerCollisions() {
+    int64_t radSum = SHIP_RADIUS_FP + BULLET_RADIUS_FP;
+    int64_t radSq  = radSum * radSum;
+
+    for (auto& bullet : g_bullets) {
+        if (!bullet.alive) continue;
+
+        for (auto& p : g_players) {
+            if (!p.connected || !p.alive) continue;
+            if (p.id == bullet.ownerId) continue;
+
+            if (DistSqFP(bullet.x, bullet.y, p.x, p.y) < radSq) {
+                bullet.alive = false;
+
+                if (p.health > 0) {
+                    if (p.health > BULLET_DAMAGE_HP)
+                        p.health = static_cast<uint8_t>(p.health - BULLET_DAMAGE_HP);
+                    else
+                        p.health = 0;
+                }
+
+                if (p.health == 0) {
+                    p.alive = false;
+                    if (p.lives > 0) --p.lives;
+                    p.respawnTick = g_tick + RESPAWN_TICKS;
+
+                    PktPlayerDead pkt{};
+                    pkt.hdr.type = MSG_PLAYER_DEAD;
+                    pkt.hdr.playerId = 0;
+                    pkt.hdr.seq = htons(SEQ_UNRELIABLE);
+                    pkt.hdr.timestamp = htonl(g_tick);
+                    pkt.deadPlayerId = p.id;
+                    pkt.livesRemaining = p.lives;
+                    Broadcast(&pkt, sizeof(pkt));
+
+                    if (g_phase == GamePhase::PLAYING)
+                        EndRound();
+                    return;
+                }
+
+                break;
+            }
+        }
+    }
+}
+
 // ── Bullet-asteroid collision ─────────────────────────────────────────────────
 static void CheckBulletAsteroidCollisions() {
     for (auto& bullet : g_bullets) {
@@ -499,6 +547,7 @@ static void CheckShipAsteroidCollisions() {
             if (DistSqFP(p.x, p.y, ast.x, ast.y) < radSum * radSum) {
                 p.alive = false;
                 if (p.lives > 0) --p.lives;
+                p.health = 0;
                 p.respawnTick = g_tick + RESPAWN_TICKS;
 
                 PktPlayerDead pkt{};
@@ -537,6 +586,7 @@ static void BroadcastGameState() {
         ps.score = htons(p.score);
         ps.alive = p.alive ? 1 : 0;
         ps.lives = p.lives;
+        ps.health = p.health;
         strncpy_s(ps.name, sizeof(ps.name), p.name, _TRUNCATE);
     }
     pkt.playerCount = static_cast<uint8_t>(pi);
@@ -619,6 +669,7 @@ static void HandleJoin(const PktJoin& pkt, const sockaddr_in& from) {
     strncpy_s(slot->name, sizeof(slot->name), pkt.name, _TRUNCATE);
     slot->connected = true;
     slot->alive = (g_phase == GamePhase::PLAYING);
+    slot->health = PLAYER_MAX_HEALTH;
     slot->lives = INITIAL_LIVES;
     slot->score = 0;
     slot->x = ((count + 1) * WORLD_W / (g_maxPlayers + 1)) * FP_SCALE;
@@ -659,7 +710,10 @@ static void HandleJoin(const PktJoin& pkt, const sockaddr_in& from) {
         std::cout << "[Server] Starting game with " << CountConnected() << " players.\n";
         g_phase = GamePhase::PLAYING;
         for (auto& p : g_players) {
-            if (p.connected) p.alive = true;
+            if (!p.connected) continue;
+            p.alive  = true;
+            p.health = PLAYER_MAX_HEALTH;
+            p.lives  = INITIAL_LIVES;
         }
         SpawnInitialAsteroids();
         BroadcastGameState();
@@ -671,6 +725,7 @@ static void HandleInput(const PktInput& pkt, const sockaddr_in& from) {
     ServerPlayer* p = FindPlayer(from);
     if (!p) return;
     p->keys = pkt.keys;
+    p->angle = ntohs(pkt.aimAngle);
     p->lastSeenTick = g_tick;
 }
 
@@ -768,8 +823,8 @@ static void UpdatePhysics() {
         if (!p.alive) {
             if (p.lives > 0 && g_tick >= p.respawnTick) {
                 p.alive = true;
+                p.health = PLAYER_MAX_HEALTH;
                 p.x = (WORLD_W / 2) * FP_SCALE;
-                //p.y = (WORLD_H / 2) * FP_SCALE;
                 p.y = groundYFP;
                 p.velX = 0;
                 p.velY = 0;
@@ -801,9 +856,6 @@ static void UpdatePhysics() {
         if (p.keys & INPUT_ROTATE_RIGHT) moveX += FIGHTER_MOVE_SPEED_FP;
         p.velX = moveX;
 
-        if (moveX < 0)      p.angle = 1800; // facing left
-        else if (moveX > 0) p.angle = 0;    // facing right
-
         bool onGround = (p.y <= groundYFP);
         if (onGround) {
             p.y = groundYFP;
@@ -823,16 +875,13 @@ static void UpdatePhysics() {
             ServerBullet* bs = GetFreeBulletSlot();
 
             if (bid && bs) {
-                //float rad = DegToRad(p.angle / 10.0f);
+                float rad = DegToRad(static_cast<float>(p.angle) / 10.0f);
                 bs->id = bid;
                 bs->ownerId = p.id;
                 bs->x = p.x;
                 bs->y = p.y;
-                // bs->velX = p.velX + static_cast<int32_t>(std::cos(rad) * BULLET_SPEED_FP);
-                // bs->velY = p.velY + static_cast<int32_t>(std::sin(rad) * BULLET_SPEED_FP);
-                int32_t dir = (p.angle == 1800) ? -1 : 1;
-                bs->velX = dir * BULLET_SPEED_FP;
-                bs->velY = 0;
+                bs->velX = static_cast<int32_t>(std::cos(rad) * BULLET_SPEED_FP);
+                bs->velY = static_cast<int32_t>(std::sin(rad) * BULLET_SPEED_FP);
                 bs->birthTick = g_tick;
                 bs->alive = true;
 
@@ -870,16 +919,25 @@ static void UpdatePhysics() {
         a.y = WrapFP(a.y + a.velY, WORLD_H * FP_SCALE);
     }
 
+    const int32_t worldHeightFP = WORLD_H * FP_SCALE;
+
     for (auto& b : g_bullets) {
         if (!b.alive) continue;
         if (g_tick - b.birthTick > BULLET_LIFETIME) {
             b.alive = false;
             continue;
         }
-        b.x = WrapFP(b.x + b.velX, WORLD_W * FP_SCALE);
-        b.y = WrapFP(b.y + b.velY, WORLD_H * FP_SCALE);
+
+        b.x += b.velX;
+        b.y += b.velY;
+
+        if (b.x < 0 || b.x > worldWidthFP || b.y < 0 || b.y > worldHeightFP) {
+            b.alive = false;
+            continue;
+        }
     }
 
+    CheckBulletPlayerCollisions();
     CheckBulletAsteroidCollisions();
     CheckShipAsteroidCollisions();
 

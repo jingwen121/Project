@@ -50,8 +50,12 @@ inline int32_t AsteroidRadiusFP(uint8_t size) {
 }
 
 // ── Ship collision radius ────────────────────────────────────────────────────
-constexpr int32_t SHIP_RADIUS_FP  = 12 * FP_SCALE;
+constexpr int32_t SHIP_RADIUS_FP   = 12 * FP_SCALE;
 constexpr int32_t BULLET_RADIUS_FP = 3 * FP_SCALE;
+
+// ── Fighter health/damage (logical units, not FP) ────────────────────────────
+constexpr int32_t PLAYER_MAX_HEALTH = 100;
+constexpr int32_t BULLET_DAMAGE_HP  = 20;
 
 // ── Angle helpers (stored as int16 degrees*10) ───────────────────────────────
 inline int16_t WrapAngle(int16_t a) {
