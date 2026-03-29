@@ -41,6 +41,7 @@ struct NetPlayer {
     float y;
     uint16_t score;
     uint8_t alive;
+    uint8_t lives;
     uint8_t health;
     char name[16];
     bool active;
@@ -436,6 +437,62 @@ static void DrawFrame()
     DrawFighters();
     DrawBullets();
 
+    // HUD during gameplay (live scores + local lives).
+    if (g_fontId >= 0 && !g_roundOverActive.load())
+    {
+        AEGfxSetBlendMode(AE_GFX_BM_BLEND);
+
+        AEGfxPrint(g_fontId, "Scores", -0.95f, 0.92f, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+
+        float y = 0.84f;
+        std::lock_guard<std::mutex> lock(g_netStateMtx);
+        for (int i = 0; i < MAX_PLAYERS; ++i)
+        {
+            if (!g_netPlayers[i].active)
+                continue;
+
+            char line[96]{};
+            std::snprintf(line, sizeof(line), "%s - %u", g_netPlayers[i].name, static_cast<unsigned int>(g_netPlayers[i].score));
+            AEGfxPrint(g_fontId, line, -0.95f, y, 0.55f, 0.9f, 0.9f, 0.9f, 1.0f);
+            y -= 0.07f;
+        }
+
+        // Local lives indicator (3 boxes). Boxes disappear from the left as lives decrease.
+        uint8_t lives = 0;
+        unsigned int lifeColor = 0xFFFFFFFF;
+        if (g_myId > 0 && g_myId <= MAX_PLAYERS)
+        {
+            int idx = static_cast<int>(g_myId - 1);
+            lives = g_netPlayers[idx].lives;
+            lifeColor = g_fighters[idx].color;
+        }
+
+        float minX = AEGfxGetWinMinX();
+        float maxX = AEGfxGetWinMaxX();
+        float minY = AEGfxGetWinMinY();
+        float maxY = AEGfxGetWinMaxY();
+        float w = maxX - minX;
+        float h = maxY - minY;
+
+        float boxSize = w * 0.03f;
+        float gap = w * 0.01f;
+        float marginX = w * 0.02f;
+        float marginY = h * 0.06f;
+
+        float topY = maxY - marginY;
+        float startX = (maxX - marginX) - (3.0f * boxSize + 2.0f * gap);
+
+        for (int i = 0; i < 3; ++i)
+        {
+            bool show = (lives > 0) && (i >= (3 - static_cast<int>(lives)));
+            if (!show)
+                continue;
+
+            float x = startX + i * (boxSize + gap) + boxSize * 0.5f;
+            DrawFilledRect(x, topY, boxSize, boxSize, lifeColor);
+        }
+    }
+
     if (g_fontId >= 0 && g_roundOverActive.load())
     {
         AEGfxSetBlendMode(AE_GFX_BM_BLEND);
@@ -472,7 +529,12 @@ static void DrawFrame()
             char line[128]{};
             std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundLeaderboard[i].name, static_cast<unsigned int>(g_roundLeaderboard[i].score));
             AEGfxPrint(g_fontId, line, 0.10f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
-            y -= 0.08f;
+            y -= 0.06f;
+
+            char when[64]{};
+            std::snprintf(when, sizeof(when), "%s", g_roundLeaderboard[i].datetime);
+            AEGfxPrint(g_fontId, when, 0.10f, y, 0.45f, 0.7f, 0.7f, 0.7f, 1.0f);
+            y -= 0.07f;
         }
 
         AEGfxPrint(g_fontId, "Close the window to exit", -0.30f, -0.95f, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -583,9 +645,10 @@ static void RecvThread()
                 np.y = static_cast<float>(static_cast<int32_t>(ntohl(ps.y))) / FP_SCALE;
                 np.score = ntohs(ps.score);
                 np.alive = ps.alive;
+                np.lives = ps.lives;
                 np.health = ps.health;
                 strncpy_s(np.name, sizeof(np.name), ps.name, _TRUNCATE);
-                np.active = true;
+                np.active = (ps.lives > 0);
             }
 
             for (int i = 0; i < gs.bulletCount && i < MAX_BULLETS; ++i)
