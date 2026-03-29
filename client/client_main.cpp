@@ -792,8 +792,3 @@ int main() {
     std::cout << "[Client] Exiting.\n";
     return 0;
 }
-
-int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
-{
-    return main();
-}
