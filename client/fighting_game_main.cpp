@@ -5,6 +5,8 @@
 #include "GSMList.h"
 #include "level_1.h"
 #include <cstdio>
+#include <string>
+#include <windows.h>
 
 #include <array>
 #include <atomic>
@@ -46,6 +48,7 @@ struct NetPlayer {
     float y;
     uint16_t score;
     uint8_t alive;
+    uint8_t lives;
     uint8_t health;
     char name[16];
     bool active;
@@ -63,6 +66,11 @@ static uint8_t g_netPlayerCount = 0;
 static std::mutex g_netStateMtx;
 static std::atomic<int16_t> g_lastAimAngle{0};
 static s8 g_fontId = -1;
+static AEAudioGroup g_sfxGroup{};
+static AEAudio g_laserSfx{};
+static uint32_t g_lastLaserSfxTick = 0;
+static float g_sfxVolume = 1.0f;
+static bool g_sfxVolumeDragging = false;
 static std::atomic<bool> g_roundOverActive{ false };
 static std::mutex g_roundOverMtx;
 static uint8_t g_roundWinnerCount = 0;
@@ -110,6 +118,30 @@ static bool ContainsIgnoreCase(const char* haystack, const char* needle)
     }
 
     return false;
+}
+
+static std::string GetExeDir()
+{
+    char path[MAX_PATH]{};
+    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH)
+        return std::string{};
+
+    std::string s(path);
+    const size_t pos = s.find_last_of("\\/");
+    if (pos == std::string::npos)
+        return std::string{};
+
+    return s.substr(0, pos);
+}
+
+static std::string MakeExeRelativePath(const char* relativePath)
+{
+    std::string dir = GetExeDir();
+    if (dir.empty())
+        return std::string(relativePath);
+
+    return dir + "\\" + relativePath;
 }
 
 static void SendInput(uint8_t keys);
@@ -168,8 +200,80 @@ static void CreateRectangleMesh()
     g_rectMesh = AEGfxMeshEnd();
 }
 
+static void GetSfxVolumeBarRect(float& left, float& right, float& bottom, float& top)
+{
+    float minX = AEGfxGetWinMinX();
+    float maxX = AEGfxGetWinMaxX();
+    float minY = AEGfxGetWinMinY();
+    float maxY = AEGfxGetWinMaxY();
+
+    float w = maxX - minX;
+    float h = maxY - minY;
+
+    float barW = w * 0.35f;
+    float barH = h * 0.03f;
+
+    float cx = 0.5f * (minX + maxX);
+    float cy = maxY - h * 0.08f;
+
+    left = cx - barW * 0.5f;
+    right = cx + barW * 0.5f;
+    bottom = cy - barH * 0.5f;
+    top = cy + barH * 0.5f;
+}
+
 static void HandleInputLocal()
 {
+    if (AEAudioIsValidGroup(g_sfxGroup))
+    {
+        float left = 0.0f, right = 0.0f, bottom = 0.0f, top = 0.0f;
+        GetSfxVolumeBarRect(left, right, bottom, top);
+
+        s32 mx = 0, my = 0;
+        AEInputGetCursorPosition(&mx, &my);
+
+        float minX = AEGfxGetWinMinX();
+        float maxX = AEGfxGetWinMaxX();
+        float minY = AEGfxGetWinMinY();
+        float maxY = AEGfxGetWinMaxY();
+
+        float winW = 1200.0f;
+        float winH = 720.0f;
+        float nx = static_cast<float>(mx) / winW;
+        float ny = static_cast<float>(my) / winH;
+        float cx = minX + nx * (maxX - minX);
+        float cy = maxY - ny * (maxY - minY);
+
+        const bool insideBar = (cx >= left && cx <= right && cy >= bottom && cy <= top);
+
+        if (AEInputCheckTriggered(AEVK_LBUTTON) && insideBar)
+            g_sfxVolumeDragging = true;
+
+        if (AEInputCheckReleased(AEVK_LBUTTON))
+            g_sfxVolumeDragging = false;
+
+        if (g_sfxVolumeDragging && AEInputCheckCurr(AEVK_LBUTTON))
+        {
+            float t = (cx - left) / (right - left);
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            g_sfxVolume = t;
+            AEAudioSetGroupVolume(g_sfxGroup, g_sfxVolume);
+        }
+
+        const bool volUp = AEInputCheckTriggered(AEVK_EQUAL) || AEInputCheckTriggered(AEVK_NUM_PLUS);
+        const bool volDown = AEInputCheckTriggered(AEVK_MINUS) || AEInputCheckTriggered(AEVK_NUM_MINUS);
+
+        if (volUp || volDown)
+        {
+            float v = g_sfxVolume + (volUp ? 0.1f : -0.1f);
+            if (v < 0.0f) v = 0.0f;
+            if (v > 1.0f) v = 1.0f;
+            g_sfxVolume = v;
+            AEAudioSetGroupVolume(g_sfxGroup, g_sfxVolume);
+        }
+    }
+
     if (g_roundOverActive.load())
     {
         ++g_localTick;
@@ -189,8 +293,20 @@ static void HandleInputLocal()
         keys |= INPUT_ROTATE_RIGHT;
     if (AEInputCheckCurr(AEVK_W) || AEInputCheckCurr(AEVK_UP))
         keys |= INPUT_THRUST;
-    if (AEInputCheckCurr(AEVK_SPACE) || AEInputCheckCurr(AEVK_LBUTTON))
+
+    const bool fireCurr = (AEInputCheckCurr(AEVK_SPACE) || AEInputCheckCurr(AEVK_LBUTTON));
+
+    if (fireCurr)
         keys |= INPUT_FIRE;
+
+    if (fireCurr && g_joined && AEAudioIsValidAudio(g_laserSfx) && AEAudioIsValidGroup(g_sfxGroup))
+    {
+        if ((g_localTick - g_lastLaserSfxTick) >= 8)
+        {
+            AEAudioPlay(g_laserSfx, g_sfxGroup, 1.0f, 1.0f, 0);
+            g_lastLaserSfxTick = g_localTick;
+        }
+    }
 
     int16_t aimAngle = 0;
     if (g_joined)
@@ -441,6 +557,79 @@ static void DrawFrame()
     DrawFighters();
     DrawBullets();
 
+    // HUD during gameplay (live scores + local lives).
+    if (g_fontId >= 0 && !g_roundOverActive.load())
+    {
+        AEGfxSetBlendMode(AE_GFX_BM_BLEND);
+
+        AEGfxPrint(g_fontId, "Scores", -0.95f, 0.92f, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+
+        float left = 0.0f, right = 0.0f, bottom = 0.0f, top = 0.0f;
+        GetSfxVolumeBarRect(left, right, bottom, top);
+
+        float barW = right - left;
+        float barH = top - bottom;
+        float barCx = 0.5f * (left + right);
+        float barCy = 0.5f * (bottom + top);
+
+        DrawFilledRect(barCx, barCy, barW, barH, 0xFF404040);
+
+        float fillW = barW * g_sfxVolume;
+        if (fillW > 0.0f)
+        {
+            float fillCx = left + fillW * 0.5f;
+            DrawFilledRect(fillCx, barCy, fillW, barH, 0xFFFFFFFF);
+        }
+
+        float y = 0.84f;
+        std::lock_guard<std::mutex> lock(g_netStateMtx);
+        for (int i = 0; i < MAX_PLAYERS; ++i)
+        {
+            if (!g_netPlayers[i].active)
+                continue;
+
+            char line[96]{};
+            std::snprintf(line, sizeof(line), "%s - %u", g_netPlayers[i].name, static_cast<unsigned int>(g_netPlayers[i].score));
+            AEGfxPrint(g_fontId, line, -0.95f, y, 0.55f, 0.9f, 0.9f, 0.9f, 1.0f);
+            y -= 0.07f;
+        }
+
+        // Local lives indicator (3 boxes). Boxes disappear from the left as lives decrease.
+        uint8_t lives = 0;
+        unsigned int lifeColor = 0xFFFFFFFF;
+        if (g_myId > 0 && g_myId <= MAX_PLAYERS)
+        {
+            int idx = static_cast<int>(g_myId - 1);
+            lives = g_netPlayers[idx].lives;
+            lifeColor = g_fighters[idx].color;
+        }
+
+        float minX = AEGfxGetWinMinX();
+        float maxX = AEGfxGetWinMaxX();
+        float minY = AEGfxGetWinMinY();
+        float maxY = AEGfxGetWinMaxY();
+        float w = maxX - minX;
+        float h = maxY - minY;
+
+        float boxSize = w * 0.03f;
+        float gap = w * 0.01f;
+        float marginX = w * 0.02f;
+        float marginY = h * 0.06f;
+
+        float topY = maxY - marginY;
+        float startX = (maxX - marginX) - (3.0f * boxSize + 2.0f * gap);
+
+        for (int i = 0; i < 3; ++i)
+        {
+            bool show = (lives > 0) && (i >= (3 - static_cast<int>(lives)));
+            if (!show)
+                continue;
+
+            float x = startX + i * (boxSize + gap) + boxSize * 0.5f;
+            DrawFilledRect(x, topY, boxSize, boxSize, lifeColor);
+        }
+    }
+
     if (g_fontId >= 0 && g_roundOverActive.load())
     {
         AEGfxSetBlendMode(AE_GFX_BM_BLEND);
@@ -477,7 +666,12 @@ static void DrawFrame()
             char line[128]{};
             std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundLeaderboard[i].name, static_cast<unsigned int>(g_roundLeaderboard[i].score));
             AEGfxPrint(g_fontId, line, 0.10f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
-            y -= 0.08f;
+            y -= 0.06f;
+
+            char when[64]{};
+            std::snprintf(when, sizeof(when), "%s", g_roundLeaderboard[i].datetime);
+            AEGfxPrint(g_fontId, when, 0.10f, y, 0.45f, 0.7f, 0.7f, 0.7f, 1.0f);
+            y -= 0.07f;
         }
 
         AEGfxPrint(g_fontId, "Close the window to exit", -0.30f, -0.95f, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -629,9 +823,10 @@ static void RecvThread()
                 np.y = static_cast<float>(static_cast<int32_t>(ntohl(ps.y))) / FP_SCALE;
                 np.score = ntohs(ps.score);
                 np.alive = ps.alive;
+                np.lives = ps.lives;
                 np.health = ps.health;
                 strncpy_s(np.name, sizeof(np.name), ps.name, _TRUNCATE);
-                np.active = true;
+                np.active = (ps.lives > 0);
             }
 
             for (int i = 0; i < gs.bulletCount && i < MAX_BULLETS; ++i)
@@ -767,6 +962,31 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     Level1_Load();
     Level1_Initialize();
 
+    const std::string laserPath = MakeExeRelativePath("Assets\\Audio\\laser.wav");
+
+    {
+        FILE* f = nullptr;
+        fopen_s(&f, laserPath.c_str(), "rb");
+        if (!f)
+        {
+            printf("[Audio] Missing %s\n", laserPath.c_str());
+        }
+        else
+        {
+            fclose(f);
+        }
+    }
+
+    g_sfxGroup = AEAudioCreateGroup();
+    AEAudioSetGroupVolume(g_sfxGroup, 1.0f);
+    g_laserSfx = AEAudioLoadSound(laserPath.c_str());
+
+    if (!AEAudioIsValidAudio(g_laserSfx))
+        printf("[Audio] Failed to load %s (format/path). Try 16-bit PCM WAV.\n", laserPath.c_str());
+
+    CreateRectangleMesh();
+    InitPlayers();
+    StartNetworking();
     while (current != GS_QUIT)
     {
         if (current != GS_RESTART)

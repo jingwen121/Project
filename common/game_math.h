@@ -84,20 +84,4 @@ constexpr uint16_t SCORE_PLAYER_HIT      = 0;
 constexpr uint16_t SCORE_PLAYER_KILL     = 1;
 
 
-// ── Asteroid spawn velocities (FP) ───────────────────────────────────────────
-constexpr int32_t ASTEROID_SPEED_LARGE_FP  = 800;
-constexpr int32_t ASTEROID_SPEED_MEDIUM_FP = 1400;
-constexpr int32_t ASTEROID_SPEED_SMALL_FP  = 2200;
-
-inline int32_t AsteroidSpeedFP(uint8_t size) {
-    switch (size) {
-        case 3: return ASTEROID_SPEED_LARGE_FP;
-        case 2: return ASTEROID_SPEED_MEDIUM_FP;
-        default: return ASTEROID_SPEED_SMALL_FP;
-    }
-}
-
-// ── Initial asteroid count ────────────────────────────────────────────────────
-constexpr int INITIAL_ASTEROIDS = 6; // large asteroids at round start
-
 #endif // GAME_MATH_H

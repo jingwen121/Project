@@ -314,17 +314,6 @@ static void SpawnAsteroid(uint8_t size, int32_t x, int32_t y, int32_t vx, int32_
 }
 
 static void SpawnInitialAsteroids() {
-    std::uniform_int_distribution<int32_t> distX(50 * FP_SCALE, (WORLD_W - 50) * FP_SCALE);
-    std::uniform_int_distribution<int32_t> distY(50 * FP_SCALE, (WORLD_H - 50) * FP_SCALE);
-    std::uniform_real_distribution<float> distAngle(0.0f, 360.0f);
-
-    for (int i = 0; i < INITIAL_ASTEROIDS; ++i) {
-        float angle = distAngle(g_rng);
-        int32_t speed = AsteroidSpeedFP(3);
-        int32_t vx = static_cast<int32_t>(std::cos(DegToRad(angle)) * speed);
-        int32_t vy = static_cast<int32_t>(std::sin(DegToRad(angle)) * speed);
-        SpawnAsteroid(3, distX(g_rng), distY(g_rng), vx, vy);
-    }
 }
 
 // ── Reliable message helpers ──────────────────────────────────────────────────
@@ -499,86 +488,10 @@ static void CheckBulletPlayerCollisions() {
     }
 }
 
-// ── Bullet-asteroid collision ─────────────────────────────────────────────────
 static void CheckBulletAsteroidCollisions() {
-    for (auto& bullet : g_bullets) {
-        if (!bullet.alive) continue;
-
-        for (auto& ast : g_asteroids) {
-            if (!ast.alive) continue;
-
-            int64_t radSum = BULLET_RADIUS_FP + AsteroidRadiusFP(ast.size);
-            if (DistSqFP(bullet.x, bullet.y, ast.x, ast.y) < radSum * radSum) {
-                bullet.alive = false;
-
-                ServerPlayer* killer = nullptr;
-                for (auto& p : g_players) {
-                    if (p.connected && p.id == bullet.ownerId) {
-                        killer = &p;
-                        break;
-                    }
-                }
-
-                uint16_t pts = 0;
-
-                if (ast.size > 1) {
-                    std::uniform_real_distribution<float> distAngle(0.0f, 360.0f);
-                    for (int i = 0; i < 2; ++i) {
-                        float angle = distAngle(g_rng);
-                        int32_t speed = AsteroidSpeedFP(ast.size - 1);
-                        SpawnAsteroid(ast.size - 1, ast.x, ast.y,
-                            static_cast<int32_t>(std::cos(DegToRad(angle)) * speed),
-                            static_cast<int32_t>(std::sin(DegToRad(angle)) * speed));
-                    }
-                }
-
-                ast.alive = false;
-
-                PktAsteroidDead pkt{};
-                pkt.hdr.type = MSG_ASTEROID_DEAD;
-                pkt.hdr.playerId = 0;
-                uint16_t seq = NextSeq();
-                pkt.hdr.seq = htons(seq);
-                pkt.hdr.timestamp = htonl(g_tick);
-                pkt.asteroidId = ast.id;
-                pkt.killerPlayerId = killer ? killer->id : 0;
-                pkt.points = htons(pts);
-                SendReliable(MSG_ASTEROID_DEAD, &pkt, sizeof(pkt));
-
-                BroadcastScores();
-                break;
-            }
-        }
-    }
 }
 
-// ── Ship-asteroid collision ───────────────────────────────────────────────────
 static void CheckShipAsteroidCollisions() {
-    for (auto& p : g_players) {
-        if (!p.connected || !p.alive) continue;
-
-        for (auto& ast : g_asteroids) {
-            if (!ast.alive) continue;
-
-            int64_t radSum = SHIP_RADIUS_FP + AsteroidRadiusFP(ast.size);
-            if (DistSqFP(p.x, p.y, ast.x, ast.y) < radSum * radSum) {
-                p.alive = false;
-                if (p.lives > 0) --p.lives;
-                p.health = 0;
-                p.respawnTick = g_tick + RESPAWN_TICKS;
-
-                PktPlayerDead pkt{};
-                pkt.hdr.type = MSG_PLAYER_DEAD;
-                pkt.hdr.playerId = 0;
-                pkt.hdr.seq = htons(SEQ_UNRELIABLE);
-                pkt.hdr.timestamp = htonl(g_tick);
-                pkt.deadPlayerId = p.id;
-                pkt.livesRemaining = p.lives;
-                Broadcast(&pkt, sizeof(pkt));
-                break;
-            }
-        }
-    }
 }
 
 // ── Game state broadcast ──────────────────────────────────────────────────────
@@ -608,19 +521,7 @@ static void BroadcastGameState() {
     }
     pkt.playerCount = static_cast<uint8_t>(pi);
 
-    int ai = 0;
-    for (auto& a : g_asteroids) {
-        if (!a.alive) continue;
-        auto& as = pkt.asteroids[ai++];
-        as.id = a.id;
-        as.size = a.size;
-        as.alive = 1;
-        as.x = htonl(a.x);
-        as.y = htonl(a.y);
-        as.velX = htons(static_cast<uint16_t>(a.velX));
-        as.velY = htons(static_cast<uint16_t>(a.velY));
-    }
-    pkt.asteroidCount = static_cast<uint8_t>(ai);
+    pkt.asteroidCount = 0;
 
     int bi = 0;
     for (auto& b : g_bullets) {
@@ -750,7 +651,6 @@ static void HandleJoin(const PktJoin& pkt, const sockaddr_in& from) {
             p.health = PLAYER_MAX_HEALTH;
             p.lives  = INITIAL_LIVES;
         }
-        SpawnInitialAsteroids();
         BroadcastGameState();
     }
 }
@@ -948,12 +848,6 @@ static void UpdatePhysics() {
         }
     }
 
-    for (auto& a : g_asteroids) {
-        if (!a.alive) continue;
-        a.x = WrapFP(a.x + a.velX, WORLD_W * FP_SCALE);
-        a.y = WrapFP(a.y + a.velY, WORLD_H * FP_SCALE);
-    }
-
     const int32_t worldHeightFP = WORLD_H * FP_SCALE;
 
     for (auto& b : g_bullets) {
@@ -973,19 +867,6 @@ static void UpdatePhysics() {
     }
 
     CheckBulletPlayerCollisions();
-    CheckBulletAsteroidCollisions();
-    CheckShipAsteroidCollisions();
-
-    bool anyAsteroid = false;
-    for (auto& a : g_asteroids) {
-        if (a.alive) {
-            anyAsteroid = true;
-            break;
-        }
-    }
-    if (!anyAsteroid && g_phase == GamePhase::PLAYING) {
-        EndRound();
-    }
 
     bool anyLivesLeft = false;
     for (auto& p : g_players) {
