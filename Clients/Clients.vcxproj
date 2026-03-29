@@ -70,6 +70,18 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <IncludePath>$(SolutionDir)lib\AlphaEngine\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\AlphaEngine\lib;$(LibraryPath)</LibraryPath>
+    <OutDir>$(SolutionDir)bin\$(Configuration)-$(Platform)\</OutDir>
+    <IntDir>$(SolutionDir).tmp\$(Configuration)-$(Platform)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>$(SolutionDir)lib\AlphaEngine\include;$(IncludePath)</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\AlphaEngine\lib;$(LibraryPath)</LibraryPath>
+    <OutDir>$(SolutionDir)bin\$(Configuration)-$(Platform)\</OutDir>
+    <IntDir>$(SolutionDir).tmp\$(Configuration)-$(Platform)\</IntDir>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -105,9 +117,19 @@
       <TreatWarningAsError>false</TreatWarningAsError>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Alpha_EngineD.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>if not exist "$(TargetDir)Assets\" mkdir "$(TargetDir)Assets"
+
+xcopy "$(SolutionDir)Assets\*" "$(TargetDir)Assets\" /s /r /y /q
+
+xcopy "$(SolutionDir)lib\AlphaEngine\lib\freetype.dll"     "$(TargetDir)" /r /y /q
+xcopy "$(SolutionDir)lib\AlphaEngine\lib\Alpha_EngineD.dll" "$(TargetDir)" /r /y /q
+xcopy "$(SolutionDir)lib\AlphaEngine\lib\fmodL.dll"        "$(TargetDir)" /r /y /q</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -119,12 +141,23 @@
       <ConformanceMode>true</ConformanceMode>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Alpha_Engine.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy "$(SolutionDir)Assets\*"
+"$(OutDir)Assets\" /s /r /y /q
+xcopy "$(SolutionDir)lib\AlphaEngine\lib\freetype.dll"
+"$(OutDir)" /s /r /y /q
+"$(SolutionDir)lib\AlphaEngine\lib\Alpha_Engine.dll"
+"$(OutDir)" /s /r /y /q
+"$(SolutionDir)lib\AlphaEngine\lib\fmod.dll"
+"$(OutDir)" /s /r /y /q</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\client\client_main.cpp" />
+    <ClCompile Include="..\client\fighting_game_main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\common\game_math.h" />
