@@ -1,6 +1,9 @@
 #include "../common/game_protocol.h"
 #include "../common/game_math.h"
 #include "AEEngine.h"
+#include "GameStateManager.h"
+#include "GSMList.h"
+#include "level_1.h"
 #include <cstdio>
 
 #include <array>
@@ -10,7 +13,9 @@
 #include <cstring>
 #include <chrono>
 #include <cmath>
+#include <crtdbg.h>
 
+#if 0
 struct Fighter
 {
     float x;
@@ -495,6 +500,47 @@ static void DrawFrame()
     }
 }
 
+void Level1_Load()
+{
+    CreateRectangleMesh();
+    g_fontId = AEGfxCreateFont("C:\\Windows\\Fonts\\arial.ttf", 24);
+}
+
+void Level1_Initialize()
+{
+    InitPlayers();
+    StartNetworking();
+}
+
+void Level1_Update()
+{
+    UpdateGame();
+}
+
+void Level1_Draw()
+{
+    DrawFrame();
+}
+
+void Level1_Free()
+{
+    if (g_rectMesh)
+    {
+        AEGfxMeshFree(g_rectMesh);
+        g_rectMesh = nullptr;
+    }
+}
+
+void Level1_Unload()
+{
+    if (g_fontId >= 0)
+    {
+        AEGfxDestroyFont(g_fontId);
+        g_fontId = -1;
+    }
+    StopNetworking();
+}
+
 static void SendTo(const void* data, int len)
 {
     sendto(g_sock, reinterpret_cast<const char*>(data), len, 0,
@@ -699,45 +745,57 @@ static void StopNetworking()
     CleanupNetworking();
 }
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow)
-{
-    int winWidth = 1200;
-    int winHeight = 720;
-    int createConsole = 1;
-    unsigned int maxFps = 60;
-    bool vsync = true;
+#endif
 
-    if (!AESysInit(hInstance, nCmdShow, winWidth, winHeight,
-        createConsole, maxFps, vsync, 0))
-    {
+int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPWSTR lpCmdLine,
+    _In_ int nCmdShow)
+{
+    _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
+
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+
+    if (!AESysInit(hInstance, nCmdShow, 1600, 900, 0, 60, FALSE, 0))
         return -1;
-    }
 
     AESysSetWindowTitle("2-4 Player Fighting Game");
 
-    g_fontId = AEGfxCreateFont("C:\\Windows\\Fonts\\arial.ttf", 24);
+    GSM_Initialize(GS_LEVEL1);
 
-    CreateRectangleMesh();
-    InitPlayers();
-    StartNetworking();
+    Level1_Load();
+    Level1_Initialize();
 
-    while (AESysDoesWindowExist())
+    while (current != GS_QUIT)
     {
-        AESysFrameStart();
+        if (current != GS_RESTART)
+            GSM_Update();
+        else
+        {
+            next = previous;
+            current = previous;
+        }
 
-        UpdateGame();
-        DrawFrame();
+        while (next == current)
+        {
+            AESysFrameStart();
 
-        AESysFrameEnd();
+            Level1_Update();
+            Level1_Draw();
+
+            if (!AESysDoesWindowExist())
+                next = GS_QUIT;
+
+            AESysFrameEnd();
+        }
+
+        previous = current;
+        current = next;
     }
 
-    StopNetworking();
-
-    if (g_rectMesh)
-        AEGfxMeshFree(g_rectMesh);
-
-    if (g_fontId >= 0)
-        AEGfxDestroyFont(g_fontId);
+    Level1_Free();
+    Level1_Unload();
 
     AESysExit();
     return 0;
