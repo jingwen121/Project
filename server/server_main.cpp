@@ -449,6 +449,13 @@ static void CheckBulletPlayerCollisions() {
             if (DistSqFP(bullet.x, bullet.y, p.x, p.y) < radSq) {
                 bullet.alive = false;
 
+                for (auto& k : g_players) {
+                    if (k.connected && k.id == bullet.ownerId) {
+                        k.score = static_cast<uint16_t>(k.score + SCORE_PLAYER_HIT);
+                        break;
+                    }
+                }
+
                 if (p.health > 0) {
                     if (p.health > BULLET_DAMAGE_HP)
                         p.health = static_cast<uint8_t>(p.health - BULLET_DAMAGE_HP);
@@ -472,13 +479,6 @@ static void CheckBulletPlayerCollisions() {
 
                     if (g_phase == GamePhase::PLAYING)
                     {
-                        for (auto& k : g_players) {
-                            if (k.connected && k.id == bullet.ownerId) {
-                                k.score = static_cast<uint16_t>(k.score + SCORE_PLAYER_KILL);
-                                break;
-                            }
-                        }
-
                         EndRound();
                     }
                     return;
