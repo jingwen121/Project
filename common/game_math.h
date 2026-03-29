@@ -80,19 +80,9 @@ constexpr int32_t FIGHTER_JUMP_SPEED_FP  = 14000; // initial jump velocity (upwa
 constexpr int32_t FIGHTER_GRAVITY_FP     = 600;   // gravity applied each tick (downward)
 
 // ── Scoring ──────────────────────────────────────────────────────────────────
-constexpr uint16_t SCORE_PLAYER_HIT      = 1;
-constexpr uint16_t SCORE_PLAYER_KILL     = 0;
-constexpr uint16_t SCORE_LARGE_ASTEROID  = 0;
-constexpr uint16_t SCORE_MEDIUM_ASTEROID = 0;
-constexpr uint16_t SCORE_SMALL_ASTEROID  = 0;
+constexpr uint16_t SCORE_PLAYER_HIT      = 0;
+constexpr uint16_t SCORE_PLAYER_KILL     = 1;
 
-inline uint16_t AsteroidScore(uint8_t size) {
-    switch (size) {
-        case 3: return SCORE_LARGE_ASTEROID;
-        case 2: return SCORE_MEDIUM_ASTEROID;
-        default: return SCORE_SMALL_ASTEROID;
-    }
-}
 
 // ── Asteroid spawn velocities (FP) ───────────────────────────────────────────
 constexpr int32_t ASTEROID_SPEED_LARGE_FP  = 800;

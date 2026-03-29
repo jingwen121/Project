@@ -449,13 +449,6 @@ static void CheckBulletPlayerCollisions() {
             if (DistSqFP(bullet.x, bullet.y, p.x, p.y) < radSq) {
                 bullet.alive = false;
 
-                for (auto& k : g_players) {
-                    if (k.connected && k.id == bullet.ownerId) {
-                        k.score = static_cast<uint16_t>(k.score + SCORE_PLAYER_HIT);
-                        break;
-                    }
-                }
-
                 if (p.health > 0) {
                     if (p.health > BULLET_DAMAGE_HP)
                         p.health = static_cast<uint8_t>(p.health - BULLET_DAMAGE_HP);
@@ -479,7 +472,23 @@ static void CheckBulletPlayerCollisions() {
 
                     if (g_phase == GamePhase::PLAYING)
                     {
-                        EndRound();
+                        for (auto& k : g_players) {
+                            if (k.connected && k.id == bullet.ownerId) {
+                                k.score = static_cast<uint16_t>(k.score + SCORE_PLAYER_KILL);
+                                break;
+                            }
+                        }
+
+                        int aliveWithLives = 0;
+                        for (auto& q : g_players) {
+                            if (q.connected && q.lives > 0) {
+                                ++aliveWithLives;
+                            }
+                        }
+
+                        if (aliveWithLives <= 1) {
+                            EndRound();
+                        }
                     }
                     return;
                 }
@@ -510,8 +519,7 @@ static void CheckBulletAsteroidCollisions() {
                     }
                 }
 
-                uint16_t pts = AsteroidScore(ast.size);
-                if (killer) killer->score += pts;
+                uint16_t pts = 0;
 
                 if (ast.size > 1) {
                     std::uniform_real_distribution<float> distAngle(0.0f, 360.0f);
