@@ -528,6 +528,7 @@ static void BroadcastGameState() {
     for (auto& p : g_players) {
         if (!p.connected) continue;
         auto& ps = pkt.players[pi++];
+        ps.playerId = p.id;
         ps.x = htonl(p.x);
         ps.y = htonl(p.y);
         ps.angle = htons(static_cast<uint16_t>(p.angle));

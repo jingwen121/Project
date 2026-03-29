@@ -21,8 +21,9 @@ struct Fighter
     unsigned int color;
 };
 
-static Fighter g_fighters[4];
-static int g_playerCount = 2;
+// use MAX_PLAYERS to match server capacity
+static std::array<Fighter, MAX_PLAYERS> g_fighters{};
+static int g_playerCount = 0;
 static AEGfxVertexList* g_rectMesh = nullptr;
 
 static SOCKET     g_sock  = INVALID_SOCKET;
@@ -34,6 +35,7 @@ static uint32_t g_localTick = 0;
 static uint32_t g_lastServerTick = 0;
 
 struct NetPlayer {
+    uint8_t playerId; // store server id (1-based)
     float x;
     float y;
     uint16_t score;
@@ -62,7 +64,7 @@ static void InitPlayers()
     float midX = 0.5f * (minX + maxX);
     float midY = 0.5f * (minY + maxY);
 
-    for (int i = 0; i < 4; ++i)
+    for (int i = 0; i < static_cast<int>(g_fighters.size()); ++i)
     {
         float offset = (maxX - minX) * 0.2f;
         g_fighters[i].x = (i % 2 == 0) ? (midX - offset) : (midX + offset);
@@ -82,8 +84,9 @@ static void InitPlayers()
     }
 
     // Debug: print initial window bounds and first two fighters
-    printf("InitPlayers: winMinX=%f winMaxX=%f winMinY=%f winMaxY=%f\n", minX, maxX, minY, maxY);
-    for (int i = 0; i < 2; ++i)
+    printf("InitPlayers: winMinX=%f winMaxX=%f winMinY=%f winMaxY=%f\n",
+           AEGfxGetWinMinX(), AEGfxGetWinMaxX(), AEGfxGetWinMinY(), AEGfxGetWinMaxY());
+    for (int i = 0; i < 2 && i < static_cast<int>(g_fighters.size()); ++i)
         printf("Player %d initial pos: x=%f y=%f\n", i, g_fighters[i].x, g_fighters[i].y);
 
 }
@@ -114,7 +117,8 @@ static void HandleInputLocal()
     if (AEInputCheckCurr(AEVK_SPACE))
         keys |= INPUT_FIRE;
 
-    if (g_joined && g_sock != INVALID_SOCKET && keys != 0)
+    // Always send current keys so server gets key releases as well
+    if (g_joined && g_sock != INVALID_SOCKET)
         SendInput(keys);
 
     ++g_localTick;
@@ -139,7 +143,7 @@ static void ClampToArena()
     float groundHeight = (maxY - minY) * 0.05f;
     float groundHalfH = groundHeight * 0.5f;
 
-    for (int i = 0; i < g_playerCount; ++i)
+    for (int i = 0; i < static_cast<int>(g_fighters.size()); ++i)
     {
         Fighter& f = g_fighters[i];
 
@@ -147,7 +151,6 @@ static void ClampToArena()
         if (f.x > right) f.x = right;
 
         // Place fighter so their feet sit on top of the ground rectangle.
-        // NOTE: add (not subtract) because y increases upward in world coords.
         f.y = groundY + groundHalfH + fighterHalfH;
     }
 }
@@ -156,20 +159,25 @@ static void SyncFightersFromNet()
 {
     std::lock_guard<std::mutex> lock(g_netStateMtx);
 
+    // Count active and map server state into local fighter slots using playerId
+    int activeCount = 0;
     float minX = AEGfxGetWinMinX();
     float maxX = AEGfxGetWinMaxX();
     float minY = AEGfxGetWinMinY();
     float maxY = AEGfxGetWinMaxY();
-
     float width = maxX - minX;
     float height = maxY - minY;
 
-    g_playerCount = g_netPlayerCount;
-
-    for (int i = 0; i < g_playerCount; ++i)
+    for (int id = 0; id < MAX_PLAYERS; ++id)
     {
-        const NetPlayer& np = g_netPlayers[i];
-        Fighter& f = g_fighters[i];
+        const NetPlayer& np = g_netPlayers[id];
+        Fighter& f = g_fighters[id];
+
+        if (!np.active)
+        {
+            f.health = 0;
+            continue;
+        }
 
         float nx = np.x / static_cast<float>(WORLD_W);
         float ny = np.y / static_cast<float>(WORLD_H);
@@ -177,7 +185,10 @@ static void SyncFightersFromNet()
         f.x = minX + nx * width;
         f.y = minY + ny * height;
         f.health = np.alive ? 100 : 0;
+        ++activeCount;
     }
+
+    g_playerCount = activeCount;
 }
 
 static void UpdateGame()
@@ -240,19 +251,31 @@ static void DrawFighters()
     float minY = AEGfxGetWinMinY();
     float maxY = AEGfxGetWinMaxY();
 
-    // Set render state once for all fighters
     AEGfxSetRenderMode(AE_GFX_RM_COLOR);
     AEGfxSetBlendMode(AE_GFX_BM_NONE);
     AEGfxSetTransparency(1.0f);
 
-    // Use sizes relative to window so fighters are visible at any resolution
-    float width = (maxX - minX) * 0.05f;   // 5% of window width
-    float height = (maxY - minY) * 0.15f;  // 15% of window height
+    float width = (maxX - minX) * 0.05f;
+    float height = (maxY - minY) * 0.15f;
 
-    for (int i = 0; i < g_playerCount; ++i)
+    bool anyActive = false;
+    for (int i = 0; i < MAX_PLAYERS; ++i)
     {
+        if (!g_netPlayers[i].active)
+            continue;
+        anyActive = true;
         Fighter& f = g_fighters[i];
         DrawFilledRect(f.x, f.y, width, height, f.color);
+    }
+
+    if (!anyActive)
+    {
+        int localCount = static_cast<int>(g_fighters.size());
+        for (int i = 0; i < localCount; ++i)
+        {
+            Fighter& f = g_fighters[i];
+            DrawFilledRect(f.x, f.y, width, height, f.color);
+        }
     }
 }
 
@@ -272,9 +295,10 @@ static void DrawFrame()
         float minY = AEGfxGetWinMinY();
         float maxY = AEGfxGetWinMaxY();
         printf("DrawFrame: winMinX=%f winMaxX=%f winMinY=%f winMaxY=%f\n", minX, maxX, minY, maxY);
-        for (int i = 0; i < g_playerCount; ++i)
+        for (int i = 0; i < static_cast<int>(g_fighters.size()); ++i)
         {
-            printf("Player %d pos after Clamp: x=%f y=%f\n", i, g_fighters[i].x, g_fighters[i].y);
+            printf("Player slot %d pos after Clamp: x=%f y=%f active=%d\n", i, g_fighters[i].x, g_fighters[i].y,
+                   g_netPlayers[i].active ? 1 : 0);
         }
         s_debugPrinted = true;
     }
@@ -315,8 +339,7 @@ static void SendPing()
     PktPing pkt{};
     pkt.hdr.type = MSG_PING;
     pkt.hdr.seq  = htons(static_cast<uint16_t>(++s_pingSeq));
-    uint64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
-                       Clock::now().time_since_epoch()).count();
+    uint64_t now = std::chrono::duration_cast<std::chrono::microseconds>(Clock::now().time_since_epoch()).count();
     pkt.clientTime = now;
     SendTo(&pkt, sizeof(pkt));
 }
@@ -354,11 +377,17 @@ static void RecvThread()
             std::memcpy(&gs, buf, sizeof(PktGameState));
             std::lock_guard<std::mutex> lock(g_netStateMtx);
             g_lastServerTick  = ntohl(gs.gameTick);
-            g_netPlayerCount  = gs.playerCount;
+
+            // clear actives first
+            for (int i = 0; i < MAX_PLAYERS; ++i) g_netPlayers[i].active = false;
+
+            // server now provides playerId per PlayerState; map by id-1
             for (int i = 0; i < gs.playerCount && i < MAX_PLAYERS; ++i)
             {
-                auto& ps = gs.players[i];
-                auto& np = g_netPlayers[i];
+                const PlayerState& ps = gs.players[i];
+                int idIndex = (ps.playerId > 0 && ps.playerId <= MAX_PLAYERS) ? (ps.playerId - 1) : i;
+                auto& np = g_netPlayers[idIndex];
+                np.playerId = ps.playerId;
                 np.x = static_cast<float>(static_cast<int32_t>(ntohl(ps.x))) / FP_SCALE;
                 np.y = static_cast<float>(static_cast<int32_t>(ntohl(ps.y))) / FP_SCALE;
                 np.score = ntohs(ps.score);
@@ -366,8 +395,12 @@ static void RecvThread()
                 strncpy_s(np.name, sizeof(np.name), ps.name, _TRUNCATE);
                 np.active = true;
             }
-            for (int i = gs.playerCount; i < MAX_PLAYERS; ++i)
-                g_netPlayers[i].active = false;
+
+            // update active count
+            int cnt = 0;
+            for (int i = 0; i < MAX_PLAYERS; ++i) if (g_netPlayers[i].active) ++cnt;
+            g_netPlayerCount = static_cast<uint8_t>(cnt);
+
             break;
         }
         default:

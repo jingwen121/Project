@@ -140,6 +140,7 @@ struct PktAck {
 
 // ── Per-player state inside MSG_GAME_STATE ───────────────────────────────────
 struct PlayerState {
+    uint8_t  playerId;   // server-assigned player ID (1-based)
     int32_t  x;          // fixed-point position * 1000  (network byte order)
     int32_t  y;
     int16_t  angle;      // degrees * 10  (network byte order)
