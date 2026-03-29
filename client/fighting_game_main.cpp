@@ -108,16 +108,20 @@ static void HandleInputLocal()
 {
     uint8_t keys = 0;
 
+    // INPUT_ROTATE_LEFT  → move left
+    // INPUT_ROTATE_RIGHT → move right
+    // INPUT_THRUST       → jump
+    // INPUT_FIRE         → shoot
+
     if (AEInputCheckCurr(AEVK_A) || AEInputCheckCurr(AEVK_LEFT))
         keys |= INPUT_ROTATE_LEFT;
     if (AEInputCheckCurr(AEVK_D) || AEInputCheckCurr(AEVK_RIGHT))
         keys |= INPUT_ROTATE_RIGHT;
     if (AEInputCheckCurr(AEVK_W) || AEInputCheckCurr(AEVK_UP))
         keys |= INPUT_THRUST;
-    if (AEInputCheckCurr(AEVK_SPACE))
+    if (AEInputCheckCurr(AEVK_SPACE) || AEInputCheckCurr(AEVK_LBUTTON))
         keys |= INPUT_FIRE;
 
-    // Always send current keys so server gets key releases as well
     if (g_joined && g_sock != INVALID_SOCKET)
         SendInput(keys);
 
