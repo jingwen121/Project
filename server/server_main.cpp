@@ -759,6 +759,9 @@ static void RecvThread() {
 
 // ── Physics update (server-authoritative) ────────────────────────────────────
 static void UpdatePhysics() {
+    const int32_t worldWidthFP  = WORLD_W * FP_SCALE;
+    const int32_t groundYFP     = (WORLD_H * FP_SCALE) / 5;  // fighter center ~20% up so feet sit on platform
+
     for (auto& p : g_players) {
         if (!p.connected) continue;
 
@@ -766,32 +769,52 @@ static void UpdatePhysics() {
             if (p.lives > 0 && g_tick >= p.respawnTick) {
                 p.alive = true;
                 p.x = (WORLD_W / 2) * FP_SCALE;
-                p.y = (WORLD_H / 2) * FP_SCALE;
+                //p.y = (WORLD_H / 2) * FP_SCALE;
+                p.y = groundYFP;
                 p.velX = 0;
                 p.velY = 0;
             }
             continue;
         }
 
-        if (p.keys & INPUT_ROTATE_LEFT)  p.angle = WrapAngle(p.angle - SHIP_TURN_RATE);
-        if (p.keys & INPUT_ROTATE_RIGHT) p.angle = WrapAngle(p.angle + SHIP_TURN_RATE);
+        //  if (p.keys & INPUT_ROTATE_LEFT)  p.angle = WrapAngle(p.angle - SHIP_TURN_RATE);
+        // if (p.keys & INPUT_ROTATE_RIGHT) p.angle = WrapAngle(p.angle + SHIP_TURN_RATE);
 
-        if (p.keys & INPUT_THRUST) {
-            float rad = DegToRad(p.angle / 10.0f);
-            p.velX += static_cast<int32_t>(std::cos(rad) * SHIP_THRUST_FP);
-            p.velY += static_cast<int32_t>(std::sin(rad) * SHIP_THRUST_FP);
+        // if (p.keys & INPUT_THRUST) {
+        //     float rad = DegToRad(p.angle / 10.0f);
+        //     p.velX += static_cast<int32_t>(std::cos(rad) * SHIP_THRUST_FP);
+        //     p.velY += static_cast<int32_t>(std::sin(rad) * SHIP_THRUST_FP);
 
-            float speed = std::sqrt(static_cast<float>(p.velX) * p.velX +
-                static_cast<float>(p.velY) * p.velY);
-            if (speed > SHIP_MAX_SPEED_FP) {
-                float scale = SHIP_MAX_SPEED_FP / speed;
-                p.velX = static_cast<int32_t>(p.velX * scale);
-                p.velY = static_cast<int32_t>(p.velY * scale);
-            }
+        //     float speed = std::sqrt(static_cast<float>(p.velX) * p.velX +
+        //         static_cast<float>(p.velY) * p.velY);
+        //     if (speed > SHIP_MAX_SPEED_FP) {
+        //         float scale = SHIP_MAX_SPEED_FP / speed;
+        //         p.velX = static_cast<int32_t>(p.velX * scale);
+        //         p.velY = static_cast<int32_t>(p.velY * scale);
+        //     }
+        // }
+
+        // p.velX = p.velX * SHIP_FRICTION / 1000;
+        // p.velY = p.velY * SHIP_FRICTION / 1000;
+        int32_t moveX = 0;
+        if (p.keys & INPUT_ROTATE_LEFT)  moveX -= FIGHTER_MOVE_SPEED_FP;
+        if (p.keys & INPUT_ROTATE_RIGHT) moveX += FIGHTER_MOVE_SPEED_FP;
+        p.velX = moveX;
+
+        if (moveX < 0)      p.angle = 1800; // facing left
+        else if (moveX > 0) p.angle = 0;    // facing right
+
+        bool onGround = (p.y <= groundYFP);
+        if (onGround) {
+            p.y = groundYFP;
+            if (p.velY < 0) p.velY = 0;
         }
 
-        p.velX = p.velX * SHIP_FRICTION / 1000;
-        p.velY = p.velY * SHIP_FRICTION / 1000;
+        if (onGround && (p.keys & INPUT_THRUST)) {
+            p.velY = +FIGHTER_JUMP_SPEED_FP;
+        }
+
+        p.velY -= FIGHTER_GRAVITY_FP;
 
         static std::array<uint32_t, MAX_PLAYERS> lastFire{};
         if ((p.keys & INPUT_FIRE) && g_tick - lastFire[p.id - 1] > 15) {
@@ -800,13 +823,16 @@ static void UpdatePhysics() {
             ServerBullet* bs = GetFreeBulletSlot();
 
             if (bid && bs) {
-                float rad = DegToRad(p.angle / 10.0f);
+                //float rad = DegToRad(p.angle / 10.0f);
                 bs->id = bid;
                 bs->ownerId = p.id;
                 bs->x = p.x;
                 bs->y = p.y;
-                bs->velX = p.velX + static_cast<int32_t>(std::cos(rad) * BULLET_SPEED_FP);
-                bs->velY = p.velY + static_cast<int32_t>(std::sin(rad) * BULLET_SPEED_FP);
+                // bs->velX = p.velX + static_cast<int32_t>(std::cos(rad) * BULLET_SPEED_FP);
+                // bs->velY = p.velY + static_cast<int32_t>(std::sin(rad) * BULLET_SPEED_FP);
+                int32_t dir = (p.angle == 1800) ? -1 : 1;
+                bs->velX = dir * BULLET_SPEED_FP;
+                bs->velY = 0;
                 bs->birthTick = g_tick;
                 bs->alive = true;
 
@@ -825,8 +851,17 @@ static void UpdatePhysics() {
             }
         }
 
-        p.x = WrapFP(p.x + p.velX, WORLD_W * FP_SCALE);
-        p.y = WrapFP(p.y + p.velY, WORLD_H * FP_SCALE);
+        // p.x = WrapFP(p.x + p.velX, WORLD_W * FP_SCALE);
+        // p.y = WrapFP(p.y + p.velY, WORLD_H * FP_SCALE);
+        p.x += p.velX;
+        p.y += p.velY;
+
+        if (p.x < 0) p.x = 0;
+        if (p.x > worldWidthFP) p.x = worldWidthFP;
+        if (p.y < groundYFP) {
+            p.y = groundYFP;
+            if (p.velY < 0) p.velY = 0;
+        }
     }
 
     for (auto& a : g_asteroids) {

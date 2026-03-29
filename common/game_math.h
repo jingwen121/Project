@@ -70,6 +70,11 @@ constexpr uint32_t BULLET_LIFETIME    = 60;   // ticks before despawn
 constexpr uint32_t RESPAWN_TICKS      = 120;  // 4 seconds at 30Hz
 constexpr int      INITIAL_LIVES      = 3;
 
+// ── Fighting-game style movement (server-side) ───────────────────────────────
+constexpr int32_t FIGHTER_MOVE_SPEED_FP  = 4000;  // horizontal speed per tick
+constexpr int32_t FIGHTER_JUMP_SPEED_FP  = 14000; // initial jump velocity (upward)
+constexpr int32_t FIGHTER_GRAVITY_FP     = 600;   // gravity applied each tick (downward)
+
 // ── Scoring ──────────────────────────────────────────────────────────────────
 constexpr uint16_t SCORE_LARGE_ASTEROID  = 20;
 constexpr uint16_t SCORE_MEDIUM_ASTEROID = 50;
