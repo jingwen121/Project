@@ -11,6 +11,8 @@
 #include <cstring>
 #include <chrono>
 #include <cmath>
+#include <string>
+#include <vector>
 
 struct Fighter
 {
@@ -66,6 +68,39 @@ static std::array<PktScoreUpdate::Entry, MAX_PLAYERS> g_roundWinners{};
 static uint8_t g_roundLeaderboardCount = 0;
 static std::array<LeaderboardEntry, LEADERBOARD_SIZE> g_roundLeaderboard{};
 
+static std::mutex g_chatMtx;
+static std::vector<std::string> g_chatLog;
+static bool g_chatMode = false;
+static std::string g_chatBuf;
+
+static AEAudioGroup g_sfxGroup{};
+static AEAudio g_laserSfx{};
+static uint32_t g_lastLaserSfxTick = 0;
+
+static std::string GetExeDir()
+{
+    char path[MAX_PATH]{};
+    DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH)
+        return std::string{};
+
+    std::string s(path);
+    size_t pos = s.find_last_of("\\/");
+    if (pos == std::string::npos)
+        return std::string{};
+
+    return s.substr(0, pos);
+}
+
+static std::string MakeExeRelativePath(const char* relativePath)
+{
+    std::string dir = GetExeDir();
+    if (dir.empty())
+        return std::string(relativePath);
+
+    return dir + "\\" + relativePath;
+}
+
 static const char* PlayerColorLabel(uint8_t playerId)
 {
     switch (playerId)
@@ -113,6 +148,7 @@ static void SendJoin();
 static void SendPing();
 static void StartNetworking();
 static void StopNetworking();
+static void SendChat(const std::string& text);
 
 static void InitPlayers()
 {
@@ -171,6 +207,63 @@ static void HandleInputLocal()
         return;
     }
 
+    if (!g_chatMode && AEInputCheckTriggered(AEVK_T))
+    {
+        g_chatMode = true;
+        g_chatBuf.clear();
+    }
+
+    if (g_chatMode)
+    {
+        if (AEInputCheckTriggered(AEVK_RETURN))
+        {
+            if (!g_chatBuf.empty())
+                SendChat(g_chatBuf);
+            g_chatBuf.clear();
+            g_chatMode = false;
+        }
+        else if (AEInputCheckTriggered(AEVK_ESCAPE))
+        {
+            g_chatBuf.clear();
+            g_chatMode = false;
+        }
+        else if (AEInputCheckTriggered(AEVK_BACK))
+        {
+            if (!g_chatBuf.empty())
+                g_chatBuf.pop_back();
+        }
+        else
+        {
+            for (int i = 0; i < 26; ++i)
+            {
+                u8 key = static_cast<u8>(AEVK_A + i);
+                if (AEInputCheckTriggered(key))
+                {
+                    bool shift = AEInputCheckCurr(AEVK_LSHIFT) || AEInputCheckCurr(AEVK_RSHIFT);
+                    char c = static_cast<char>('A' + i);
+                    char out = shift ? c : static_cast<char>(c + ('a' - 'A'));
+                    g_chatBuf.push_back(out);
+                }
+            }
+
+            for (int i = 0; i < 10; ++i)
+            {
+                u8 key = static_cast<u8>(AEVK_0 + i);
+                if (AEInputCheckTriggered(key))
+                {
+                    char c = static_cast<char>('0' + i);
+                    g_chatBuf.push_back(c);
+                }
+            }
+
+            if (AEInputCheckTriggered(AEVK_SPACE))
+                g_chatBuf.push_back(' ');
+        }
+
+        ++g_localTick;
+        return;
+    }
+
     uint8_t keys = 0;
 
     if (AEInputCheckCurr(AEVK_A) || AEInputCheckCurr(AEVK_LEFT))
@@ -179,8 +272,20 @@ static void HandleInputLocal()
         keys |= INPUT_ROTATE_RIGHT;
     if (AEInputCheckCurr(AEVK_W) || AEInputCheckCurr(AEVK_UP))
         keys |= INPUT_THRUST;
-    if (AEInputCheckCurr(AEVK_SPACE) || AEInputCheckCurr(AEVK_LBUTTON))
+
+    const bool fireCurr = (AEInputCheckCurr(AEVK_SPACE) || AEInputCheckCurr(AEVK_LBUTTON));
+
+    if (fireCurr)
         keys |= INPUT_FIRE;
+
+    if (fireCurr && g_joined && AEAudioIsValidAudio(g_laserSfx) && AEAudioIsValidGroup(g_sfxGroup))
+    {
+        if ((g_localTick - g_lastLaserSfxTick) >= 8)
+        {
+            AEAudioPlay(g_laserSfx, g_sfxGroup, 1.0f, 1.0f, 0);
+            g_lastLaserSfxTick = g_localTick;
+        }
+    }
 
     int16_t aimAngle = 0;
     if (g_joined)
@@ -426,6 +531,29 @@ static void DrawFrame()
     DrawFighters();
     DrawBullets();
 
+    if (g_fontId >= 0)
+    {
+        AEGfxSetBlendMode(AE_GFX_BM_BLEND);
+
+        {
+            std::lock_guard<std::mutex> lock(g_chatMtx);
+            int startLine = static_cast<int>(g_chatLog.size()) - 3;
+            if (startLine < 0) startLine = 0;
+            float y = 0.95f;
+            for (int i = startLine; i < static_cast<int>(g_chatLog.size()); ++i)
+            {
+                AEGfxPrint(g_fontId, g_chatLog[i].c_str(), -0.95f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+                y -= 0.05f;
+            }
+        }
+
+        if (g_chatMode)
+        {
+            std::string prompt = "> " + g_chatBuf;
+            AEGfxPrint(g_fontId, prompt.c_str(), -0.95f, -0.9f, 0.6f, 1.0f, 1.0f, 0.5f, 1.0f);
+        }
+    }
+
     if (g_fontId >= 0 && g_roundOverActive.load())
     {
         AEGfxSetBlendMode(AE_GFX_BM_BLEND);
@@ -515,6 +643,22 @@ static void SendInput(uint8_t keys)
     SendTo(&pkt, sizeof(pkt));
 }
 
+static void SendChat(const std::string& text)
+{
+    if (!g_joined || g_sock == INVALID_SOCKET)
+        return;
+    if (text.empty())
+        return;
+
+    PktChat pkt{};
+    pkt.hdr.type = MSG_CHAT;
+    pkt.hdr.playerId = g_myId;
+    pkt.hdr.seq = htons(SEQ_UNRELIABLE);
+    pkt.hdr.timestamp = htonl(g_localTick);
+    strncpy_s(pkt.text, sizeof(pkt.text), text.c_str(), _TRUNCATE);
+    SendTo(&pkt, sizeof(pkt));
+}
+
 static void SendPing()
 {
     using Clock = std::chrono::steady_clock;
@@ -592,6 +736,46 @@ static void RecvThread()
             for (int i = 0; i < MAX_PLAYERS; ++i) if (g_netPlayers[i].active) ++cnt;
             g_netPlayerCount = static_cast<uint8_t>(cnt);
 
+            break;
+        }
+        case MSG_PLAYER_JOIN:
+        {
+            if (r < static_cast<int>(sizeof(PktPlayerEvent)))
+                break;
+
+            PktPlayerEvent pe{};
+            std::memcpy(&pe, buf, sizeof(PktPlayerEvent));
+            char msg[64]{};
+            std::snprintf(msg, sizeof(msg), "*** %s joined the game ***", pe.name);
+            std::lock_guard<std::mutex> lock(g_chatMtx);
+            g_chatLog.emplace_back(msg);
+            if (g_chatLog.size() > 20) g_chatLog.erase(g_chatLog.begin());
+            break;
+        }
+        case MSG_PLAYER_LEAVE:
+        {
+            if (r < static_cast<int>(sizeof(PktPlayerEvent)))
+                break;
+
+            PktPlayerEvent pe{};
+            std::memcpy(&pe, buf, sizeof(PktPlayerEvent));
+            char msg[64]{};
+            std::snprintf(msg, sizeof(msg), "*** %s left the game ***", pe.name);
+            std::lock_guard<std::mutex> lock(g_chatMtx);
+            g_chatLog.emplace_back(msg);
+            if (g_chatLog.size() > 20) g_chatLog.erase(g_chatLog.begin());
+            break;
+        }
+        case MSG_CHAT_BROADCAST:
+        {
+            if (r < static_cast<int>(sizeof(PktChat)))
+                break;
+
+            PktChat chat{};
+            std::memcpy(&chat, buf, sizeof(PktChat));
+            std::lock_guard<std::mutex> lock(g_chatMtx);
+            g_chatLog.emplace_back(std::string(chat.text));
+            if (g_chatLog.size() > 20) g_chatLog.erase(g_chatLog.begin());
             break;
         }
         case MSG_ROUND_OVER:
@@ -694,6 +878,12 @@ void Level1_Load()
 {
     CreateRectangleMesh();
     g_fontId = AEGfxCreateFont("C:\\Windows\\Fonts\\arial.ttf", 24);
+
+    const std::string laserPath = MakeExeRelativePath("Assets\\Audio\\laser.wav");
+
+    g_sfxGroup = AEAudioCreateGroup();
+    AEAudioSetGroupVolume(g_sfxGroup, 1.0f);
+    g_laserSfx = AEAudioLoadSound(laserPath.c_str());
 }
 
 void Level1_Initialize()

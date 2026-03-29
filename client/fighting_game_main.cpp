@@ -962,31 +962,31 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     Level1_Load();
     Level1_Initialize();
 
-    const std::string laserPath = MakeExeRelativePath("Assets\\Audio\\laser.wav");
+    //  const std::string laserPath = MakeExeRelativePath("Assets\\Audio\\laser.wav");
 
-    {
-        FILE* f = nullptr;
-        fopen_s(&f, laserPath.c_str(), "rb");
-        if (!f)
-        {
-            printf("[Audio] Missing %s\n", laserPath.c_str());
-        }
-        else
-        {
-            fclose(f);
-        }
-    }
+    // {
+    //     FILE* f = nullptr;
+    //     fopen_s(&f, laserPath.c_str(), "rb");
+    //     if (!f)
+    //     {
+    //         printf("[Audio] Missing %s\n", laserPath.c_str());
+    //     }
+    //     else
+    //     {
+    //         fclose(f);
+    //     }
+    // }
 
-    g_sfxGroup = AEAudioCreateGroup();
-    AEAudioSetGroupVolume(g_sfxGroup, 1.0f);
-    g_laserSfx = AEAudioLoadSound(laserPath.c_str());
+    // g_sfxGroup = AEAudioCreateGroup();
+    // AEAudioSetGroupVolume(g_sfxGroup, 1.0f);
+    // g_laserSfx = AEAudioLoadSound(laserPath.c_str());
 
-    if (!AEAudioIsValidAudio(g_laserSfx))
-        printf("[Audio] Failed to load %s (format/path). Try 16-bit PCM WAV.\n", laserPath.c_str());
+    // if (!AEAudioIsValidAudio(g_laserSfx))
+    //     printf("[Audio] Failed to load %s (format/path). Try 16-bit PCM WAV.\n", laserPath.c_str());
 
-    CreateRectangleMesh();
-    InitPlayers();
-    StartNetworking();
+    // CreateRectangleMesh();
+    // InitPlayers();
+    // StartNetworking();
     while (current != GS_QUIT)
     {
         if (current != GS_RESTART)
