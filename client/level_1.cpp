@@ -732,13 +732,13 @@ static void DrawFrame()
     {
         AEGfxSetBlendMode(AE_GFX_BM_BLEND);
 
-        AEGfxPrint(g_fontId, "ROUND OVER", 0.20f, 0.95f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+        AEGfxPrint(g_fontId, "ROUND OVER", -0.28f, 0.95f, 1.05f, 1.0f, 1.0f, 1.0f, 1.0f);
 
         std::lock_guard<std::mutex> lock(g_roundOverMtx);
 
         // Winners – top right
         float y = 0.85f;
-        AEGfxPrint(g_fontId, "Winners", 0.20f, y, 0.7f, 1.0f, 0.9f, 0.2f, 1.0f);
+        AEGfxPrint(g_fontId, "Winners", 0.77f, y, 0.75f, 1.0f, 0.9f, 0.2f, 1.0f);
         y -= 0.09f;
 
         for (int i = 0; i < static_cast<int>(g_roundWinnerCount) && i < MAX_PLAYERS; ++i)
@@ -752,29 +752,29 @@ static void DrawFrame()
                 std::snprintf(line, sizeof(line), "%d) %s %s - %u", i + 1, g_roundWinners[i].name, color, static_cast<unsigned int>(score));
             else
                 std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundWinners[i].name, static_cast<unsigned int>(score));
-            AEGfxPrint(g_fontId, line, 0.20f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+            AEGfxPrint(g_fontId, line, 0.77f, y, 0.65f, 1.0f, 1.0f, 1.0f, 1.0f);
             y -= 0.08f;
         }
 
         // Top 5 leaderboard – below winners, still top right
         y -= 0.05f;
-        AEGfxPrint(g_fontId, "Top 5 All-Time", 0.20f, y, 0.7f, 0.2f, 0.9f, 1.0f, 1.0f);
+        AEGfxPrint(g_fontId, "Top 5 All-Time", 0.77f, y, 0.75f, 0.2f, 0.9f, 1.0f, 1.0f);
         y -= 0.09f;
 
         for (int i = 0; i < static_cast<int>(g_roundLeaderboardCount) && i < LEADERBOARD_SIZE; ++i)
         {
             char line[128]{};
             std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundLeaderboard[i].name, static_cast<unsigned int>(g_roundLeaderboard[i].score));
-            AEGfxPrint(g_fontId, line, 0.20f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+            AEGfxPrint(g_fontId, line, 0.77f, y, 0.65f, 1.0f, 1.0f, 1.0f, 1.0f);
             y -= 0.06f;
 
             char when[64]{};
             std::snprintf(when, sizeof(when), "%s", g_roundLeaderboard[i].datetime);
-            AEGfxPrint(g_fontId, when, 0.20f, y, 0.45f, 0.7f, 0.7f, 0.7f, 1.0f);
-            y -= 0.07f;
+            AEGfxPrint(g_fontId, when, 0.77f, y, 0.50f, 0.7f, 0.7f, 0.7f, 1.0f);
+            y -= 0.08f;
         }
 
-        AEGfxPrint(g_fontId, "Close the window to exit", -0.30f, -0.95f, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+        AEGfxPrint(g_fontId, "Close the window to exit", -0.30f, 0.85f, 0.65f, 1.0f, 1.0f, 1.0f, 1.0f);
     }
 
     if (!s_debugPrinted)
