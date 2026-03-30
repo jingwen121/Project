@@ -44,6 +44,7 @@ struct NetPlayer {
     float y;
     uint16_t score;
     uint8_t alive;
+    uint8_t lives;
     uint8_t health;
     char name[16];
     bool active;
@@ -76,6 +77,8 @@ static std::string g_chatBuf;
 static AEAudioGroup g_sfxGroup{};
 static AEAudio g_laserSfx{};
 static uint32_t g_lastLaserSfxTick = 0;
+static float g_sfxVolume = 1.0f;
+static bool g_sfxVolumeDragging = false;
 
 static std::string GetExeDir()
 {
@@ -200,8 +203,81 @@ static void CreateRectangleMesh()
     g_rectMesh = AEGfxMeshEnd();
 }
 
+static void GetSfxVolumeBarRect(float& left, float& right, float& bottom, float& top)
+{
+    float minX = AEGfxGetWinMinX();
+    float maxX = AEGfxGetWinMaxX();
+    float minY = AEGfxGetWinMinY();
+    float maxY = AEGfxGetWinMaxY();
+
+    float w = maxX - minX;
+    float h = maxY - minY;
+
+    float barW = w * 0.35f;
+    float barH = h * 0.03f;
+
+    float cx = 0.5f * (minX + maxX);
+    float cy = maxY - h * 0.08f;
+
+    left   = cx - barW * 0.5f;
+    right  = cx + barW * 0.5f;
+    bottom = cy - barH * 0.5f;
+    top    = cy + barH * 0.5f;
+}
+
 static void HandleInputLocal()
 {
+    // ── Volume bar mouse drag + keyboard ──────────────────────────────────
+    if (AEAudioIsValidGroup(g_sfxGroup))
+    {
+        float left = 0.0f, right = 0.0f, bottom = 0.0f, top = 0.0f;
+        GetSfxVolumeBarRect(left, right, bottom, top);
+
+        s32 mx = 0, my = 0;
+        AEInputGetCursorPosition(&mx, &my);
+
+        float minX = AEGfxGetWinMinX();
+        float maxX = AEGfxGetWinMaxX();
+        float minY = AEGfxGetWinMinY();
+        float maxY = AEGfxGetWinMaxY();
+
+        float winW = 1600.0f;
+        float winH = 900.0f;
+        float nx = static_cast<float>(mx) / winW;
+        float ny = static_cast<float>(my) / winH;
+        float cx = minX + nx * (maxX - minX);
+        float cy = maxY - ny * (maxY - minY);
+
+        const bool insideBar = (cx >= left && cx <= right && cy >= bottom && cy <= top);
+
+        if (AEInputCheckTriggered(AEVK_LBUTTON) && insideBar)
+            g_sfxVolumeDragging = true;
+
+        if (AEInputCheckReleased(AEVK_LBUTTON))
+            g_sfxVolumeDragging = false;
+
+        if (g_sfxVolumeDragging && AEInputCheckCurr(AEVK_LBUTTON))
+        {
+            float t = (cx - left) / (right - left);
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            g_sfxVolume = t;
+            AEAudioSetGroupVolume(g_sfxGroup, g_sfxVolume);
+        }
+
+        const bool volUp   = AEInputCheckTriggered(AEVK_EQUAL) || AEInputCheckTriggered(AEVK_NUM_PLUS);
+        const bool volDown = AEInputCheckTriggered(AEVK_MINUS) || AEInputCheckTriggered(AEVK_NUM_MINUS);
+
+        if (volUp || volDown)
+        {
+            float v = g_sfxVolume + (volUp ? 0.1f : -0.1f);
+            if (v < 0.0f) v = 0.0f;
+            if (v > 1.0f) v = 1.0f;
+            g_sfxVolume = v;
+            AEAudioSetGroupVolume(g_sfxGroup, g_sfxVolume);
+        }
+    }
+
     if (g_roundOverActive.load())
     {
         ++g_localTick;
@@ -547,10 +623,92 @@ static void DrawFrame()
     DrawFighters();
     DrawBullets();
 
-    if (g_fontId >= 0)
+    // ── HUD: scores + volume bar + lives boxes (gameplay only) ────────────
+    if (g_fontId >= 0 && !g_roundOverActive.load())
     {
         AEGfxSetBlendMode(AE_GFX_BM_BLEND);
 
+        // Scores list (top-left, shifted down)
+        AEGfxPrint(g_fontId, "Scores", -0.95f, 0.70f, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+
+        float scoreY = 0.62f;
+        {
+            std::lock_guard<std::mutex> lock(g_netStateMtx);
+            for (int i = 0; i < MAX_PLAYERS; ++i)
+            {
+                if (!g_netPlayers[i].active)
+                    continue;
+                char line[96]{};
+                std::snprintf(line, sizeof(line), "%s - %u", g_netPlayers[i].name,
+                              static_cast<unsigned int>(g_netPlayers[i].score));
+                AEGfxPrint(g_fontId, line, -0.95f, scoreY, 0.55f, 0.9f, 0.9f, 0.9f, 1.0f);
+                scoreY -= 0.07f;
+            }
+        }
+
+        // Volume bar (top-center)
+        {
+            float left = 0.0f, right = 0.0f, bottom = 0.0f, top = 0.0f;
+            GetSfxVolumeBarRect(left, right, bottom, top);
+
+            float barW  = right - left;
+            float barH  = top - bottom;
+            float barCx = 0.5f * (left + right);
+            float barCy = 0.5f * (bottom + top);
+
+            // Background track
+            DrawFilledRect(barCx, barCy, barW, barH, 0xFF404040);
+
+            // Filled portion
+            float fillW = barW * g_sfxVolume;
+            if (fillW > 0.0f)
+            {
+                float fillCx = left + fillW * 0.5f;
+                DrawFilledRect(fillCx, barCy, fillW, barH, 0xFFFFFFFF);
+            }
+
+            // Label
+            AEGfxPrint(g_fontId, "Volume", barCx - 0.07f, top + 0.04f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f);
+        }
+
+        // Lives boxes (top-right, coloured squares)
+        {
+            uint8_t lives = 0;
+            unsigned int lifeColor = 0xFFFFFFFF;
+            if (g_myId > 0 && g_myId <= MAX_PLAYERS)
+            {
+                int idx = static_cast<int>(g_myId - 1);
+                std::lock_guard<std::mutex> lock(g_netStateMtx);
+                lives     = g_netPlayers[idx].lives;
+                lifeColor = g_fighters[idx].color;
+            }
+
+            float minX = AEGfxGetWinMinX();
+            float maxX = AEGfxGetWinMaxX();
+            float minY = AEGfxGetWinMinY();
+            float maxY = AEGfxGetWinMaxY();
+            float w = maxX - minX;
+            float h = maxY - minY;
+
+            float boxSize = w * 0.03f;
+            float gap     = w * 0.01f;
+            float marginX = w * 0.02f;
+            float marginY = h * 0.06f;
+
+            float topY   = maxY - marginY;
+            float startX = (maxX - marginX) - (3.0f * boxSize + 2.0f * gap);
+
+            for (int i = 0; i < 3; ++i)
+            {
+                bool show = (lives > 0) && (i >= (3 - static_cast<int>(lives)));
+                if (!show)
+                    continue;
+                float x = startX + i * (boxSize + gap) + boxSize * 0.5f;
+                DrawFilledRect(x, topY, boxSize, boxSize, lifeColor);
+            }
+        }
+
+        // Chat log (bottom-left)
         {
             std::lock_guard<std::mutex> lock(g_chatMtx);
             int startLine = static_cast<int>(g_chatLog.size()) - 3;
@@ -574,13 +732,14 @@ static void DrawFrame()
     {
         AEGfxSetBlendMode(AE_GFX_BM_BLEND);
 
-        AEGfxPrint(g_fontId, "ROUND OVER", -0.25f, 0.85f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+        AEGfxPrint(g_fontId, "ROUND OVER", 0.20f, 0.95f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
 
         std::lock_guard<std::mutex> lock(g_roundOverMtx);
 
-        float y = 0.70f;
-        AEGfxPrint(g_fontId, "Winners", -0.95f, y, 0.7f, 1.0f, 0.9f, 0.2f, 1.0f);
-        y -= 0.10f;
+        // Winners – top right
+        float y = 0.85f;
+        AEGfxPrint(g_fontId, "Winners", 0.20f, y, 0.7f, 1.0f, 0.9f, 0.2f, 1.0f);
+        y -= 0.09f;
 
         for (int i = 0; i < static_cast<int>(g_roundWinnerCount) && i < MAX_PLAYERS; ++i)
         {
@@ -593,20 +752,26 @@ static void DrawFrame()
                 std::snprintf(line, sizeof(line), "%d) %s %s - %u", i + 1, g_roundWinners[i].name, color, static_cast<unsigned int>(score));
             else
                 std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundWinners[i].name, static_cast<unsigned int>(score));
-            AEGfxPrint(g_fontId, line, -0.95f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+            AEGfxPrint(g_fontId, line, 0.20f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
             y -= 0.08f;
         }
 
-        y = 0.70f;
-        AEGfxPrint(g_fontId, "Top 5 All-Time", 0.10f, y, 0.7f, 0.2f, 0.9f, 1.0f, 1.0f);
-        y -= 0.10f;
+        // Top 5 leaderboard – below winners, still top right
+        y -= 0.05f;
+        AEGfxPrint(g_fontId, "Top 5 All-Time", 0.20f, y, 0.7f, 0.2f, 0.9f, 1.0f, 1.0f);
+        y -= 0.09f;
 
         for (int i = 0; i < static_cast<int>(g_roundLeaderboardCount) && i < LEADERBOARD_SIZE; ++i)
         {
             char line[128]{};
             std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundLeaderboard[i].name, static_cast<unsigned int>(g_roundLeaderboard[i].score));
-            AEGfxPrint(g_fontId, line, 0.10f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
-            y -= 0.08f;
+            AEGfxPrint(g_fontId, line, 0.20f, y, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
+            y -= 0.06f;
+
+            char when[64]{};
+            std::snprintf(when, sizeof(when), "%s", g_roundLeaderboard[i].datetime);
+            AEGfxPrint(g_fontId, when, 0.20f, y, 0.45f, 0.7f, 0.7f, 0.7f, 1.0f);
+            y -= 0.07f;
         }
 
         AEGfxPrint(g_fontId, "Close the window to exit", -0.30f, -0.95f, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
@@ -747,6 +912,7 @@ static void RecvThread()
                 np.y = static_cast<float>(static_cast<int32_t>(ntohl(ps.y))) / FP_SCALE;
                 np.score = ntohs(ps.score);
                 np.alive = ps.alive;
+                np.lives = ps.lives;
                 np.health = ps.health;
                 strncpy_s(np.name, sizeof(np.name), ps.name, _TRUNCATE);
                 np.active = true;
