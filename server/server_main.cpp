@@ -316,6 +316,47 @@ static void SpawnAsteroid(uint8_t size, int32_t x, int32_t y, int32_t vx, int32_
 static void SpawnInitialAsteroids() {
 }
 
+static void SetSpawnPosition(ServerPlayer& p) {
+    const int32_t groundYFP         = 180 * FP_SCALE;
+    const int32_t platformTopYFP    = 420 * FP_SCALE;
+    const int32_t platformTopLMinFP = 100 * FP_SCALE;
+    const int32_t platformTopLMaxFP = 300 * FP_SCALE;
+    const int32_t platformTopRMinFP = 500 * FP_SCALE;
+    const int32_t platformTopRMaxFP = 700 * FP_SCALE;
+
+    const int32_t leftGroundXFP  = 80 * FP_SCALE;
+    const int32_t rightGroundXFP = (WORLD_W - 80) * FP_SCALE;
+
+    int32_t x = (WORLD_W / 2) * FP_SCALE;
+    int32_t y = groundYFP;
+
+    switch (p.id) {
+    case 1:
+        x = leftGroundXFP;
+        y = groundYFP;
+        break;
+    case 2:
+        x = rightGroundXFP;
+        y = groundYFP;
+        break;
+    case 3:
+        x = (platformTopLMinFP + platformTopLMaxFP) / 2;
+        y = platformTopYFP;
+        break;
+    case 4:
+        x = (platformTopRMinFP + platformTopRMaxFP) / 2;
+        y = platformTopYFP;
+        break;
+    default:
+        break;
+    }
+
+    p.x = x;
+    p.y = y;
+    p.velX = 0;
+    p.velY = 0;
+}
+
 // ── Reliable message helpers ──────────────────────────────────────────────────
 static void SendReliable(MsgType type, const void* data, int len) {
     ReliableMsg rm{};
@@ -555,6 +596,7 @@ static void StartGameFromWaiting() {
         p.alive  = true;
         p.health = PLAYER_MAX_HEALTH;
         p.lives  = INITIAL_LIVES;
+        SetSpawnPosition(p);
     }
     BroadcastGameState();
 }
@@ -626,11 +668,8 @@ static void HandleJoin(const PktJoin& pkt, const sockaddr_in& from) {
     slot->health = PLAYER_MAX_HEALTH;
     slot->lives = INITIAL_LIVES;
     slot->score = 0;
-    slot->x = ((count + 1) * WORLD_W / (g_maxPlayers + 1)) * FP_SCALE;
-    slot->y = (WORLD_H / 2) * FP_SCALE;
+    SetSpawnPosition(*slot);
     slot->angle = 0;
-    slot->velX = 0;
-    slot->velY = 0;
     slot->lastSeenTick = g_tick;
 
     std::cout << "[Server] Player " << static_cast<int>(newId) << " joined: " << slot->name << "\n";
@@ -786,10 +825,7 @@ static void UpdatePhysics() {
             if (p.lives > 0 && g_tick >= p.respawnTick) {
                 p.alive = true;
                 p.health = PLAYER_MAX_HEALTH;
-                p.x = (WORLD_W / 2) * FP_SCALE;
-                p.y = groundYFP;
-                p.velX = 0;
-                p.velY = 0;
+                SetSpawnPosition(p);
             }
             continue;
         }

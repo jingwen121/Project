@@ -380,23 +380,24 @@ static void HandleInputLocal()
         s32 mx = 0, my = 0;
         AEInputGetCursorPosition(&mx, &my);
 
-        float px = 0.0f, py = 0.0f;
-        {
-            std::lock_guard<std::mutex> lock(g_netStateMtx);
-            int idx = (g_myId > 0 && g_myId <= MAX_PLAYERS) ? (g_myId - 1) : 0;
-            px = g_netPlayers[idx].x;
-            py = g_netPlayers[idx].y;
-        }
+        float minX = AEGfxGetWinMinX();
+        float maxX = AEGfxGetWinMaxX();
+        float minY = AEGfxGetWinMinY();
+        float maxY = AEGfxGetWinMaxY();
 
-        float winW = 1200.0f;
-        float winH = 720.0f;
+        float winW = 1600.0f;
+        float winH = 900.0f;
         float nx = static_cast<float>(mx) / winW;
         float ny = static_cast<float>(my) / winH;
-        float mxWorld = nx * static_cast<float>(WORLD_W);
-        float myWorld = (1.0f - ny) * static_cast<float>(WORLD_H);
+        float mxScreen = minX + nx * (maxX - minX);
+        float myScreen = maxY - ny * (maxY - minY);
 
-        float dx = mxWorld - px;
-        float dy = myWorld - py;
+        int idx = (g_myId > 0 && g_myId <= MAX_PLAYERS) ? (g_myId - 1) : 0;
+        float px = g_fighters[idx].x;
+        float py = g_fighters[idx].y;
+
+        float dx = mxScreen - px;
+        float dy = myScreen - py;
         if (dx != 0.0f || dy != 0.0f)
         {
             float angRad = std::atan2(dy, dx);
