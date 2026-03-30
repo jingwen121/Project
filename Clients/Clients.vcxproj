@@ -160,14 +160,12 @@ xcopy "$(SolutionDir)lib\AlphaEngine\lib\fmod.dll" "$(TargetDir)" /r /y /q</Comm
     <ClCompile Include="..\client\fighting_game_main.cpp" />
     <ClCompile Include="..\client\GameStateManager.cpp" />
     <ClCompile Include="..\client\level_1.cpp" />
-    <ClCompile Include="..\client\level_leaderboard.cpp" />
     <ClCompile Include="..\client\level_main_menu.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\client\GameStateManager.h" />
     <ClInclude Include="..\client\GSMList.h" />
     <ClInclude Include="..\client\level_1.h" />
-    <ClInclude Include="..\client\level_leaderboard.h" />
     <ClInclude Include="..\client\level_main_menu.h" />
     <ClInclude Include="..\common\game_math.h" />
     <ClInclude Include="..\common\game_protocol.h" />
