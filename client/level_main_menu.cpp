@@ -67,7 +67,7 @@ void MainMenu_Draw(){
     if (g_mainMenuFont >= 0)
     {
         AEGfxSetBlendMode(AE_GFX_BM_BLEND);
-        AEGfxPrint(g_mainMenuFont, "Spaceships Lobby", -0.30f, 0.40f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+        AEGfxPrint(g_mainMenuFont, "Fighting Game Lobby", -0.30f, 0.40f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
         std::string nameLine = "Name: " + g_lobbyName;
         AEGfxPrint(g_mainMenuFont, nameLine.c_str(), -0.30f, 0.20f, 0.9f, 0.9f, 0.9f, 0.9f, 1.0f);
         AEGfxPrint(g_mainMenuFont, "Type to edit, Enter to join", -0.30f, 0.05f, 0.7f, 0.8f, 0.8f, 1.0f, 1.0f);
