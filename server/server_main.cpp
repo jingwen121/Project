@@ -208,9 +208,27 @@ static void UpdateLeaderboard(const char* playerName, uint16_t score) {
     localtime_s(&tmInfo, &now);
     strftime(timebuf, sizeof(timebuf), "%Y-%m-%d %H:%M:%S", &tmInfo);
 
+    int existing = -1;
+    for (int i = 0; i < g_leaderboardCount; ++i) {
+        if (strcmp(g_leaderboard[i].name, playerName) == 0) {
+            existing = i;
+            break;
+        }
+    }
+
+    uint16_t newTotal = score;
+    if (existing >= 0) {
+        newTotal = static_cast<uint16_t>(g_leaderboard[existing].score + score);
+        for (int i = existing; i < g_leaderboardCount - 1; ++i) {
+            g_leaderboard[i] = g_leaderboard[i + 1];
+        }
+        if (g_leaderboardCount > 0)
+            --g_leaderboardCount;
+    }
+
     int insertAt = g_leaderboardCount;
     for (int i = 0; i < g_leaderboardCount; ++i) {
-        if (score > g_leaderboard[i].score) {
+        if (newTotal > g_leaderboard[i].score) {
             insertAt = i;
             break;
         }
@@ -228,7 +246,7 @@ static void UpdateLeaderboard(const char* playerName, uint16_t score) {
         playerName,
         _TRUNCATE);
 
-    g_leaderboard[insertAt].score = score;
+    g_leaderboard[insertAt].score = newTotal;
 
     strncpy_s(g_leaderboard[insertAt].datetime,
         sizeof(g_leaderboard[insertAt].datetime),
