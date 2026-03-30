@@ -234,6 +234,10 @@ static void HandleInputLocal()
     // ── Volume bar mouse drag + keyboard ──────────────────────────────────
     if (AEAudioIsValidGroup(g_sfxGroup))
     {
+        // Volume bar input mapping:
+        // - Get the bar rect in window coordinates.
+        // - Read mouse cursor (mx,my) and normalize against logical 1600x900 input.
+        // - Convert to window-space (cx,cy) to test inside-bar and compute fill.
         float left = 0.0f, right = 0.0f, bottom = 0.0f, top = 0.0f;
         GetSfxVolumeBarRect(left, right, bottom, top);
 
@@ -245,6 +249,7 @@ static void HandleInputLocal()
         float minY = AEGfxGetWinMinY();
         float maxY = AEGfxGetWinMaxY();
 
+        // Normalize cursor (assumes 1600x900 logical input) then convert to window-space.
         float winW = 1600.0f;
         float winH = 900.0f;
         float nx = static_cast<float>(mx) / winW;
@@ -252,14 +257,14 @@ static void HandleInputLocal()
         float cx = minX + nx * (maxX - minX);
         float cy = maxY - ny * (maxY - minY);
 
+        // Start drag only if click begins inside the bar.
         const bool insideBar = (cx >= left && cx <= right && cy >= bottom && cy <= top);
-
         if (AEInputCheckTriggered(AEVK_LBUTTON) && insideBar)
             g_sfxVolumeDragging = true;
-
         if (AEInputCheckReleased(AEVK_LBUTTON))
             g_sfxVolumeDragging = false;
 
+        // While dragging: set volume based on horizontal fraction along the bar.
         if (g_sfxVolumeDragging && AEInputCheckCurr(AEVK_LBUTTON))
         {
             float t = (cx - left) / (right - left);
@@ -269,9 +274,9 @@ static void HandleInputLocal()
             AEAudioSetGroupVolume(g_sfxGroup, g_sfxVolume);
         }
 
+        // Keyboard shortcut: +/- to bump volume up/down.
         const bool volUp   = AEInputCheckTriggered(AEVK_EQUAL) || AEInputCheckTriggered(AEVK_NUM_PLUS);
         const bool volDown = AEInputCheckTriggered(AEVK_MINUS) || AEInputCheckTriggered(AEVK_NUM_MINUS);
-
         if (volUp || volDown)
         {
             float v = g_sfxVolume + (volUp ? 0.1f : -0.1f);
@@ -779,10 +784,7 @@ static void DrawFrame()
             const char* color = PlayerColorLabel(g_roundWinners[i].playerId);
             const bool nameAlreadyHasColor = (color[0] != '\0') && ContainsIgnoreCase(g_roundWinners[i].name, color);
 
-            if (color[0] != '\0' && !nameAlreadyHasColor)
-                std::snprintf(line, sizeof(line), "%d) %s %s - %u", i + 1, g_roundWinners[i].name, color, static_cast<unsigned int>(score));
-            else
-                std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundWinners[i].name, static_cast<unsigned int>(score));
+            std::snprintf(line, sizeof(line), "%d) %s - %u", i + 1, g_roundWinners[i].name, static_cast<unsigned int>(score));
             AEGfxPrint(g_fontId, line, 0.77f, y, 0.65f, 1.0f, 1.0f, 1.0f, 1.0f);
             y -= 0.08f;
         }

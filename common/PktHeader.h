@@ -65,13 +65,13 @@ enum MsgType : uint8_t {
     MSG_JOIN_DENY   = 0x11, // server rejects join (full / wrong state)
     MSG_GAME_STATE  = 0x12, // full authoritative game snapshot
     MSG_ASTEROID_SPAWN  = 0x13, // new asteroid (server-authoritative position)
-    MSG_ASTEROID_DEAD   = 0x14, // asteroid destroyed – requires ACK (lock-step)
+    MSG_ASTEROID_DEAD   = 0x14, // asteroid destroyed  requires ACK (lock-step)
     MSG_BULLET_SPAWN    = 0x15, // bullet fired
     MSG_PLAYER_DEAD     = 0x16, // a player's ship was destroyed
     MSG_PLAYER_JOIN     = 0x17, // another player joined (broadcast)
     MSG_PLAYER_LEAVE    = 0x18, // a player left (broadcast)
     MSG_SCORE_UPDATE    = 0x19, // live score table
-    MSG_ROUND_OVER      = 0x1A, // round ended – carries final scores
+    MSG_ROUND_OVER      = 0x1A, // round ended carries final scores
     MSG_CHAT_BROADCAST  = 0x1B, // server relays chat to all
     MSG_PING        = 0x1C, // round-trip latency probe
     MSG_PONG        = 0x1D,
@@ -84,7 +84,7 @@ enum MsgType : uint8_t {
 constexpr uint16_t SEQ_UNRELIABLE = 0xFFFF; // marker: no ACK expected
 
 // ????????????????????????????????????????????????????????????????????????????
-//  Packet structures  (all packed – no padding bytes)
+//  Packet structures  (all packed no padding bytes)
 // ????????????????????????????????????????????????????????????????????????????
 #pragma pack(push, 1)
 
@@ -92,7 +92,7 @@ struct PktHeader {
     uint8_t  type;       // MsgType
     uint8_t  playerId;   // sender's player ID (0 = server)
     uint16_t seq;        // sequence number (network byte order); SEQ_UNRELIABLE if n/a
-    uint32_t timestamp;  // sender's tick counter (network byte order) – for ordering
+    uint32_t timestamp;  // sender's tick counter (network byte order) for ordering
 };
 
 struct PktJoin {
@@ -171,11 +171,11 @@ struct PktGameState {
 
 struct PktAsteroidSpawn {
     PktHeader    hdr;
-    AsteroidState ast; // seq in hdr is reliable – client must ACK
+    AsteroidState ast; // seq in hdr is reliable  client must ACK
 };
 
 struct PktAsteroidDead {
-    PktHeader hdr;       // seq != SEQ_UNRELIABLE ? client must send MSG_ACK
+    PktHeader hdr;       // seq != SEQ_UNRELIABLE  client must send MSG_ACK
     uint8_t   asteroidId;
     uint8_t   killerPlayerId;
     uint16_t  points;    // points awarded (network byte order)
@@ -215,7 +215,7 @@ struct LeaderboardEntry {
 };
 
 struct PktRoundOver {
-    PktHeader       hdr;          // seq != SEQ_UNRELIABLE – clients must ACK
+    PktHeader       hdr;          // seq != SEQ_UNRELIABLE  clients must ACK
     uint8_t         winnerCount;
     PktScoreUpdate::Entry winners[MAX_PLAYERS]; // sorted by score descending
     LeaderboardEntry leaderboard[LEADERBOARD_SIZE]; // top-5 all-time
@@ -234,5 +234,4 @@ struct PktPing {
 
 #pragma pack(pop)
 
-// config examples...
 #endif // GAME_PROTOCOL_H

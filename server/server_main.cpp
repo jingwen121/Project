@@ -200,6 +200,9 @@ static void SaveLeaderboard() {
         g_leaderboardCount * sizeof(LeaderboardEntry));
 }
 
+// UpdateLeaderboard: adds this match's score onto the player's existing
+// total (by name), then re-inserts into the top-5 sorted by total score.
+// Datetime is updated to the latest play.
 static void UpdateLeaderboard(const char* playerName, uint16_t score) {
     time_t now = time(nullptr);
     char timebuf[20]{};
@@ -496,6 +499,11 @@ static void CheckBulletPlayerCollisions() {
             int32_t dy = bullet.y - p.y;
             if (dy < 0) dy = -dy;
 
+            // Player-hit detection: AABB-style check using fixed-point distances.
+            // We compare |dx| and |dy| to ship half-extents + bullet radius.
+            // On hit: bullet despawns; victim loses BULLET_DAMAGE_HP; if HP reaches 0,
+            // mark dead, decrement lives and schedule respawn; award killer SCORE_PLAYER_KILL;
+            // if only one player remains with lives, the round ends.
             if (dx <= (FIGHTER_HALF_WIDTH_FP + BULLET_RADIUS_FP) &&
                 dy <= (FIGHTER_HALF_HEIGHT_FP + BULLET_RADIUS_FP)) {
                 bullet.alive = false;
