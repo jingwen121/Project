@@ -24,9 +24,6 @@
     <ClCompile Include="..\client\level_1.cpp">
       <Filter>Header Files\GSM</Filter>
     </ClCompile>
-    <ClCompile Include="..\client\level_leaderboard.cpp">
-      <Filter>Header Files\GSM</Filter>
-    </ClCompile>
     <ClCompile Include="..\client\level_main_menu.cpp">
       <Filter>Header Files\GSM</Filter>
     </ClCompile>
@@ -42,9 +39,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\client\level_1.h">
-      <Filter>Header Files\GSM</Filter>
-    </ClInclude>
-    <ClInclude Include="..\client\level_leaderboard.h">
       <Filter>Header Files\GSM</Filter>
     </ClInclude>
     <ClInclude Include="..\client\level_main_menu.h">

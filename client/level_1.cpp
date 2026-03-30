@@ -14,6 +14,8 @@
 #include <string>
 #include <vector>
 
+extern std::string g_lobbyName;
+
 struct Fighter
 {
     float x;
@@ -61,6 +63,7 @@ static std::array<NetBullet, MAX_BULLETS> g_netBullets{};
 static uint8_t g_netPlayerCount = 0;
 static std::mutex g_netStateMtx;
 static std::atomic<int16_t> g_lastAimAngle{0};
+static std::atomic<bool> g_gameStarted{ false };
 static s8 g_fontId = -1;
 static std::atomic<bool> g_roundOverActive{ false };
 static std::mutex g_roundOverMtx;
@@ -149,6 +152,7 @@ static bool ContainsIgnoreCase(const char* haystack, const char* needle)
 static void SendInput(uint8_t keys);
 static void SendJoin();
 static void SendPing();
+static void SendStartRequest();
 static void StartNetworking();
 static void StopNetworking();
 static void SendChat(const std::string& text);
@@ -284,6 +288,12 @@ static void HandleInputLocal()
         return;
     }
 
+    if (!g_chatMode && g_joined && g_sock != INVALID_SOCKET && !g_gameStarted.load())
+    {
+        if (g_myId == 1 && g_netPlayerCount >= 2 && AEInputCheckTriggered(AEVK_RETURN))
+            SendStartRequest();
+    }
+
     if (!g_chatMode && AEInputCheckTriggered(AEVK_T))
     {
         g_chatMode = true;
@@ -370,23 +380,24 @@ static void HandleInputLocal()
         s32 mx = 0, my = 0;
         AEInputGetCursorPosition(&mx, &my);
 
-        float px = 0.0f, py = 0.0f;
-        {
-            std::lock_guard<std::mutex> lock(g_netStateMtx);
-            int idx = (g_myId > 0 && g_myId <= MAX_PLAYERS) ? (g_myId - 1) : 0;
-            px = g_netPlayers[idx].x;
-            py = g_netPlayers[idx].y;
-        }
+        float minX = AEGfxGetWinMinX();
+        float maxX = AEGfxGetWinMaxX();
+        float minY = AEGfxGetWinMinY();
+        float maxY = AEGfxGetWinMaxY();
 
-        float winW = 1200.0f;
-        float winH = 720.0f;
+        float winW = 1600.0f;
+        float winH = 900.0f;
         float nx = static_cast<float>(mx) / winW;
         float ny = static_cast<float>(my) / winH;
-        float mxWorld = nx * static_cast<float>(WORLD_W);
-        float myWorld = (1.0f - ny) * static_cast<float>(WORLD_H);
+        float mxScreen = minX + nx * (maxX - minX);
+        float myScreen = maxY - ny * (maxY - minY);
 
-        float dx = mxWorld - px;
-        float dy = myWorld - py;
+        int idx = (g_myId > 0 && g_myId <= MAX_PLAYERS) ? (g_myId - 1) : 0;
+        float px = g_fighters[idx].x;
+        float py = g_fighters[idx].y;
+
+        float dx = mxScreen - px;
+        float dy = myScreen - py;
         if (dx != 0.0f || dy != 0.0f)
         {
             float angRad = std::atan2(dy, dx);
@@ -726,6 +737,26 @@ static void DrawFrame()
             std::string prompt = "> " + g_chatBuf;
             AEGfxPrint(g_fontId, prompt.c_str(), -0.95f, -0.9f, 0.6f, 1.0f, 1.0f, 0.5f, 1.0f);
         }
+
+        if (g_joined && !g_gameStarted.load())
+        {
+            char line[64]{};
+            char line2[64]{};
+            std::snprintf(line, sizeof(line), "Players connected: %u", static_cast<unsigned int>(g_netPlayerCount));
+            if (g_myId == 1)
+            {
+                if (g_netPlayerCount >= 2)
+                    std::snprintf(line2, sizeof(line2), "Press Enter to start the game");
+                else
+                    std::snprintf(line2, sizeof(line2), "Waiting for more players...");
+            }
+            else
+            {
+                std::snprintf(line2, sizeof(line2), "Waiting for host to start...");
+            }
+            AEGfxPrint(g_fontId, line, -0.30f, -0.75f, 0.7f, 0.8f, 0.8f, 0.9f, 1.0f);
+            AEGfxPrint(g_fontId, line2, -0.30f, -0.85f, 0.7f, 0.9f, 0.9f, 1.0f, 1.0f);
+        }
     }
 
     if (g_fontId >= 0 && g_roundOverActive.load())
@@ -808,7 +839,20 @@ static void SendJoin()
     pkt.hdr.playerId = 0;
     pkt.hdr.seq      = htons(SEQ_UNRELIABLE);
     pkt.hdr.timestamp = htonl(g_localTick);
-    strncpy_s(pkt.name, sizeof(pkt.name), "Player", _TRUNCATE);
+    const char* name = g_lobbyName.empty() ? "Player" : g_lobbyName.c_str();
+    strncpy_s(pkt.name, sizeof(pkt.name), name, _TRUNCATE);
+    SendTo(&pkt, sizeof(pkt));
+}
+
+static void SendStartRequest()
+{
+    if (!g_joined || g_sock == INVALID_SOCKET)
+        return;
+    PktStartRequest pkt{};
+    pkt.hdr.type = MSG_START_REQUEST;
+    pkt.hdr.playerId = g_myId;
+    pkt.hdr.seq = htons(SEQ_UNRELIABLE);
+    pkt.hdr.timestamp = htonl(g_localTick);
     SendTo(&pkt, sizeof(pkt));
 }
 
@@ -898,6 +942,7 @@ static void RecvThread()
             std::memcpy(&gs, buf, sizeof(PktGameState));
             std::lock_guard<std::mutex> lock(g_netStateMtx);
             g_lastServerTick  = ntohl(gs.gameTick);
+            g_gameStarted.store(true);
 
             for (int i = 0; i < MAX_PLAYERS; ++i) g_netPlayers[i].active = false;
             for (int i = 0; i < MAX_BULLETS; ++i) g_netBullets[i].active = false;
@@ -942,9 +987,13 @@ static void RecvThread()
             std::memcpy(&pe, buf, sizeof(PktPlayerEvent));
             char msg[64]{};
             std::snprintf(msg, sizeof(msg), "*** %s joined the game ***", pe.name);
-            std::lock_guard<std::mutex> lock(g_chatMtx);
-            g_chatLog.emplace_back(msg);
-            if (g_chatLog.size() > 20) g_chatLog.erase(g_chatLog.begin());
+            {
+                std::lock_guard<std::mutex> lock(g_chatMtx);
+                g_chatLog.emplace_back(msg);
+                if (g_chatLog.size() > 20) g_chatLog.erase(g_chatLog.begin());
+            }
+            if (g_netPlayerCount < 255)
+                ++g_netPlayerCount;
             break;
         }
         case MSG_PLAYER_LEAVE:
@@ -956,9 +1005,13 @@ static void RecvThread()
             std::memcpy(&pe, buf, sizeof(PktPlayerEvent));
             char msg[64]{};
             std::snprintf(msg, sizeof(msg), "*** %s left the game ***", pe.name);
-            std::lock_guard<std::mutex> lock(g_chatMtx);
-            g_chatLog.emplace_back(msg);
-            if (g_chatLog.size() > 20) g_chatLog.erase(g_chatLog.begin());
+            {
+                std::lock_guard<std::mutex> lock(g_chatMtx);
+                g_chatLog.emplace_back(msg);
+                if (g_chatLog.size() > 20) g_chatLog.erase(g_chatLog.begin());
+            }
+            if (g_netPlayerCount > 0)
+                --g_netPlayerCount;
             break;
         }
         case MSG_CHAT_BROADCAST:

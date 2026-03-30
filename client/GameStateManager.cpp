@@ -1,6 +1,7 @@
 #include "GameStateManager.h"
 #include "GSMList.h"
 #include "level_1.h"
+#include "level_main_menu.h"
 
 int current = 0, previous = 0, next = 0;
 
@@ -23,6 +24,15 @@ void GSM_Update()
         fpFree = Level1_Free;
         fpUnload = Level1_Unload;
         break;
+    case GS_MAIN_MENU:
+        fpLoad = MainMenu_Load;
+        fpInitialize = MainMenu_Initialize;
+        fpUpdate = MainMenu_Update;
+        fpDraw = MainMenu_Draw;
+        fpFree = MainMenu_Free;
+        fpUnload = MainMenu_Unload;
+        break;
+        
     case GS_RESTART:
     case GS_QUIT:
     default:
