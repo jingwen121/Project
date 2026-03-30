@@ -68,6 +68,7 @@ enum MsgType : uint8_t {
     MSG_ACK         = 0x03, // generic acknowledgement
     MSG_CHAT        = 0x04, // text chat message
     MSG_QUIT        = 0x05, // client is leaving
+    MSG_START_REQUEST = 0x06, // host requests to start the game
 
     // ── Server → Client ──────────────────────────────────────────────────────
     MSG_JOIN_ACK    = 0x10, // server accepts join, assigns player ID
@@ -131,6 +132,11 @@ struct PktInput {
     PktHeader hdr;
     uint8_t   keys;      // bitmask of INPUT_* flags
     int16_t   aimAngle;  // aim direction in degrees*10 (network byte order)
+};
+
+// ── MSG_START_REQUEST ────────────────────────────────────────────────────────
+struct PktStartRequest {
+    PktHeader hdr;
 };
 
 // ── MSG_ACK ──────────────────────────────────────────────────────────────────

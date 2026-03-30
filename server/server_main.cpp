@@ -544,6 +544,21 @@ static void BroadcastGameState() {
 }
 
 // ── Join handling ─────────────────────────────────────────────────────────────
+static void StartGameFromWaiting() {
+    if (g_phase != GamePhase::WAITING) return;
+    int connected = CountConnected();
+    if (connected < g_minPlayers) return;
+    std::cout << "[Server] Starting game with " << connected << " players.\n";
+    g_phase = GamePhase::PLAYING;
+    for (auto& p : g_players) {
+        if (!p.connected) continue;
+        p.alive  = true;
+        p.health = PLAYER_MAX_HEALTH;
+        p.lives  = INITIAL_LIVES;
+    }
+    BroadcastGameState();
+}
+
 static void HandleJoin(const PktJoin& pkt, const sockaddr_in& from) {
     for (auto& p : g_players) {
         if (p.connected && AddrEqual(p.addr, from)) {
@@ -644,18 +659,14 @@ static void HandleJoin(const PktJoin& pkt, const sockaddr_in& from) {
     evt.eventPlayerId = newId;
     strncpy_s(evt.name, sizeof(evt.name), slot->name, _TRUNCATE);
     Broadcast(&evt, sizeof(evt));
+}
 
-    if (g_phase == GamePhase::WAITING && CountConnected() >= g_minPlayers) {
-        std::cout << "[Server] Starting game with " << CountConnected() << " players.\n";
-        g_phase = GamePhase::PLAYING;
-        for (auto& p : g_players) {
-            if (!p.connected) continue;
-            p.alive  = true;
-            p.health = PLAYER_MAX_HEALTH;
-            p.lives  = INITIAL_LIVES;
-        }
-        BroadcastGameState();
-    }
+static void HandleStartRequest(const PktStartRequest& pkt, const sockaddr_in& from) {
+    ServerPlayer* p = FindPlayer(from);
+    if (!p) return;
+    if (g_phase != GamePhase::WAITING) return;
+    if (p->id != 1) return;
+    StartGameFromWaiting();
 }
 
 // ── Input handling ────────────────────────────────────────────────────────────
@@ -732,6 +743,9 @@ static void RecvThread() {
             break;
         case MSG_QUIT:
             HandleQuit(from);
+            break;
+        case MSG_START_REQUEST:
+            HandleStartRequest(*reinterpret_cast<PktStartRequest*>(buf), from);
             break;
         case MSG_ACK: {
             PktAck ack{};

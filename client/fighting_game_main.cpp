@@ -957,65 +957,45 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     AESysSetWindowTitle("2-4 Player Fighting Game");
 
-    GSM_Initialize(GS_LEVEL1);
+    GSM_Initialize(GS_MAIN_MENU);
+    GSM_Update();
+    if (fpLoad) fpLoad();
+    if (fpInitialize) fpInitialize();
 
-    Level1_Load();
-    Level1_Initialize();
-
-    //  const std::string laserPath = MakeExeRelativePath("Assets\\Audio\\laser.wav");
-
-    // {
-    //     FILE* f = nullptr;
-    //     fopen_s(&f, laserPath.c_str(), "rb");
-    //     if (!f)
-    //     {
-    //         printf("[Audio] Missing %s\n", laserPath.c_str());
-    //     }
-    //     else
-    //     {
-    //         fclose(f);
-    //     }
-    // }
-
-    // g_sfxGroup = AEAudioCreateGroup();
-    // AEAudioSetGroupVolume(g_sfxGroup, 1.0f);
-    // g_laserSfx = AEAudioLoadSound(laserPath.c_str());
-
-    // if (!AEAudioIsValidAudio(g_laserSfx))
-    //     printf("[Audio] Failed to load %s (format/path). Try 16-bit PCM WAV.\n", laserPath.c_str());
-
-    // CreateRectangleMesh();
-    // InitPlayers();
-    // StartNetworking();
     while (current != GS_QUIT)
     {
-        if (current != GS_RESTART)
-            GSM_Update();
-        else
+        AESysFrameStart();
+
+        if (fpUpdate) fpUpdate();
+        if (fpDraw) fpDraw();
+
+        if (!AESysDoesWindowExist())
+            next = GS_QUIT;
+
+        AESysFrameEnd();
+
+        if (next != current)
         {
-            next = previous;
-            current = previous;
+            if (fpFree) fpFree();
+            if (fpUnload) fpUnload();
+
+            previous = current;
+            current = next;
+
+            if (current == GS_RESTART)
+            {
+                next = previous;
+                current = previous;
+            }
+
+            if (current != GS_QUIT)
+            {
+                GSM_Update();
+                if (fpLoad) fpLoad();
+                if (fpInitialize) fpInitialize();
+            }
         }
-
-        while (next == current)
-        {
-            AESysFrameStart();
-
-            Level1_Update();
-            Level1_Draw();
-
-            if (!AESysDoesWindowExist())
-                next = GS_QUIT;
-
-            AESysFrameEnd();
-        }
-
-        previous = current;
-        current = next;
     }
-
-    Level1_Free();
-    Level1_Unload();
 
     AESysExit();
     return 0;
