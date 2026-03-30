@@ -1,9 +1,15 @@
+// GameStateManager.h
+// Public API for game state management and lifecycle callback wiring.
+// States use GSM_Update to select callbacks for the active scene.
 #pragma once
 
+// Function pointer type used for level lifecycle callbacks
 typedef void(*FP)(void);
 
+// Current, previous, and next requested game state identifiers
 extern int current, previous, next;
 
+// Function pointers bound to the active state's load/initialize/update/draw/free/unload routines
 extern FP fpLoad, fpInitialize, fpUpdate, fpDraw, fpFree, fpUnload;
 
 // ---------------------------------------------------------------------------- 

@@ -28,6 +28,12 @@ CONTROLS (in-game)
   T                  - Chat mode (Enter to send, ESC to cancel)
   +/-                - Adjust SFX volume (also draggable slider top-middle)
 
+MAIN MENU
+---------
+  - Type to edit lobby name 
+  - Backspace deletes last character
+  - Enter joins Level 1
+
 HUD
 ---
   - Live scores (top-left)
@@ -70,7 +76,23 @@ Client
   - Assets must exist at bin\<Config>-x64\Assets\Audio\laser.wav
 
 LAN
-  - Clients connect to 127.0.0.1 by default; for LAN, change to server LAN IP in code or config.
+  - Clients connect to 127.0.0.1 by default.
+  - For LAN: set server IP and ports in client\config.txt and server\server_config.txt.
+
+Configuration Files
+-------------------
+  client\config.txt
+    SERVER_IP      = <lan-ip>
+    SERVER_PORT    = 9000 (must match server)
+    CLIENT_PORT    = unique per client on same machine
+    PLAYER_NAME    = your display name
+
+  server\server_config.txt
+    SERVER_PORT    = 9000
+    TICK_RATE      = 30
+    MIN_PLAYERS    = 2
+    MAX_PLAYERS    = 4
+    LEADERBOARD    = leaderboard.bin
 
 ----------------------------------------------------------------------
 TECH NOTES
@@ -84,5 +106,6 @@ Gameplay
   - Level 1 (level_1.cpp) contains HUD, chat, volume bar, lives boxes
   - Sound effect loaded relative to executable path (Assets\Audio\laser.wav)
   - Round Over shows winners + Top 5 all-time
+
 
 

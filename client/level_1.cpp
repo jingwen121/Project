@@ -1,3 +1,6 @@
+
+// Networked gameplay scene: handles player snapshots, bullets, HUD, chat, audio, and scene lifecycle.
+// Uses UDP to communicate with the server (RecvThread/PingThread) and renders a simple arena.
 #include "level_1.h"
 #include "../common/game_protocol.h"
 #include "../common/game_math.h"
@@ -16,6 +19,7 @@
 
 extern std::string g_lobbyName;
 
+// Local visual representation of a player fighter used for rendering and simple client-side constraints
 struct Fighter
 {
     float x;
@@ -28,10 +32,12 @@ struct Fighter
 };
 
 // use MAX_PLAYERS to match server capacity
+// Local fighters buffer (mirrors server snapshot), current player count, and rectangle mesh for drawing
 static std::array<Fighter, MAX_PLAYERS> g_fighters{};
 static int g_playerCount = 0;
 static AEGfxVertexList* g_rectMesh = nullptr;
 
+// Networking state: UDP socket, server address, thread flags, local player id, and client/server ticks
 static SOCKET     g_sock  = INVALID_SOCKET;
 static sockaddr_in g_serverAddr{};
 static std::atomic<bool> g_netRunning{ true };
@@ -40,6 +46,7 @@ static uint8_t  g_myId = 0;
 static uint32_t g_localTick = 0;
 static uint32_t g_lastServerTick = 0;
 
+// Server-provided snapshot of a player
 struct NetPlayer {
     uint8_t playerId;
     float x;
@@ -52,6 +59,7 @@ struct NetPlayer {
     bool active;
 };
 
+// Server-provided snapshot of a bullet
 struct NetBullet {
     float x;
     float y;
@@ -72,24 +80,29 @@ static std::array<PktScoreUpdate::Entry, MAX_PLAYERS> g_roundWinners{};
 static uint8_t g_roundLeaderboardCount = 0;
 static std::array<LeaderboardEntry, LEADERBOARD_SIZE> g_roundLeaderboard{};
 
+// Chat subsystem: log, input mode toggle, and typed buffer
 static std::mutex g_chatMtx;
 static std::vector<std::string> g_chatLog;
 static bool g_chatMode = false;
 static std::string g_chatBuf;
 
+// Audio: SFX group, laser sound, volume tracking, and volume bar drag state
 static AEAudioGroup g_sfxGroup{};
 static AEAudio g_laserSfx{};
 static uint32_t g_lastLaserSfxTick = 0;
 static float g_sfxVolume = 1.0f;
 static bool g_sfxVolumeDragging = false;
 
+// Returns the directory path of the running executable (for locating assets relative to exe)
 static std::string GetExeDir()
 {
+    // Query OS for full executable path
     char path[MAX_PATH]{};
     DWORD n = GetModuleFileNameA(nullptr, path, MAX_PATH);
     if (n == 0 || n >= MAX_PATH)
         return std::string{};
 
+    // Convert to std::string and strip filename to get directory
     std::string s(path);
     size_t pos = s.find_last_of("\\/");
     if (pos == std::string::npos)
@@ -98,8 +111,10 @@ static std::string GetExeDir()
     return s.substr(0, pos);
 }
 
+// Builds a path by joining the executable directory with the given relative path
 static std::string MakeExeRelativePath(const char* relativePath)
 {
+    // Build an absolute path relative to the executable directory; fallback to input if unavailable
     std::string dir = GetExeDir();
     if (dir.empty())
         return std::string(relativePath);
@@ -107,8 +122,10 @@ static std::string MakeExeRelativePath(const char* relativePath)
     return dir + "\\" + relativePath;
 }
 
+// Human-readable color label for a given player id (used in round-over UI)
 static const char* PlayerColorLabel(uint8_t playerId)
 {
+    // Map player id to display color name used in round-over UI
     switch (playerId)
     {
         case 1: return "Red";
@@ -121,6 +138,7 @@ static const char* PlayerColorLabel(uint8_t playerId)
     }
 }
 
+// ASCII-only lowercase conversion; avoids locale complexities
 static char ToLowerAscii(char c)
 {
     if (c >= 'A' && c <= 'Z')
@@ -128,11 +146,14 @@ static char ToLowerAscii(char c)
     return c;
 }
 
+// Case-insensitive substring search (ASCII only)
 static bool ContainsIgnoreCase(const char* haystack, const char* needle)
 {
+    // ASCII case-insensitive substring search
     if (!haystack || !needle || needle[0] == '\0')
         return false;
 
+    // Slide 'h' across haystack, compare characters case-insensitively
     for (const char* h = haystack; *h; ++h)
     {
         const char* a = h;
@@ -142,6 +163,7 @@ static bool ContainsIgnoreCase(const char* haystack, const char* needle)
             ++a;
             ++b;
         }
+        // If we consumed the entire needle, match found
         if (*b == '\0')
             return true;
     }
@@ -149,6 +171,7 @@ static bool ContainsIgnoreCase(const char* haystack, const char* needle)
     return false;
 }
 
+// Networking helpers and chat: declared ahead for organization
 static void SendInput(uint8_t keys);
 static void SendJoin();
 static void SendPing();
@@ -158,6 +181,7 @@ static void StopNetworking();
 static void SendChat(const std::string& text);
 static void SendQuit();
 
+// Initializes local fighter slots and default positions/colors for rendering before server sync
 static void InitPlayers()
 {
     float minX = AEGfxGetWinMinX();
@@ -194,6 +218,7 @@ static void InitPlayers()
 
 }
 
+// Creates a reusable rectangle mesh used for drawing fighters, bars, and HUD boxes
 static void CreateRectangleMesh()
 {
     u32 color = 0xFFFFFFFF;
@@ -207,6 +232,7 @@ static void CreateRectangleMesh()
     g_rectMesh = AEGfxMeshEnd();
 }
 
+// Computes the volume bar rectangle in window coordinates for input and rendering
 static void GetSfxVolumeBarRect(float& left, float& right, float& bottom, float& top)
 {
     float minX = AEGfxGetWinMinX();
@@ -229,6 +255,7 @@ static void GetSfxVolumeBarRect(float& left, float& right, float& bottom, float&
     top    = cy + barH * 0.5f;
 }
 
+// Handles local input: chat typing, volume bar dragging, gameplay keys, aim angle calc, and SFX trigger
 static void HandleInputLocal()
 {
     // ── Volume bar mouse drag + keyboard ──────────────────────────────────
@@ -423,21 +450,25 @@ static void HandleInputLocal()
 
 static void ClampToArena()
 {
+    // Window bounds
     float minX = AEGfxGetWinMinX();
     float maxX = AEGfxGetWinMaxX();
     float minY = AEGfxGetWinMinY();
     float maxY = AEGfxGetWinMaxY();
 
+    // Horizontal walls 10% inset; ground y at 10% up from minY
     float left = minX + (maxX - minX) * 0.1f;
     float right = maxX - (maxX - minX) * 0.1f;
     float groundY = minY + (maxY - minY) * 0.1f;
 
+    // Visual sizes used to position fighter center above ground
     float fighterHeight = (maxY - minY) * 0.15f;
     float fighterHalfH = fighterHeight * 0.5f;
 
     float groundHeight = (maxY - minY) * 0.05f;
     float groundHalfH = groundHeight * 0.5f;
 
+    // Clamp X to walls and set Y so rectangle rests on ground
     for (int i = 0; i < static_cast<int>(g_fighters.size()); ++i)
     {
         Fighter& f = g_fighters[i];
@@ -451,6 +482,7 @@ static void ClampToArena()
 
 static void SyncFightersFromNet()
 {
+    // Lock net state and convert world coords to window space for rendering
     std::lock_guard<std::mutex> lock(g_netStateMtx);
 
     int activeCount = 0;
@@ -472,6 +504,7 @@ static void SyncFightersFromNet()
             continue;
         }
 
+        // Normalize server positions and scale to window
         float nx = np.x / static_cast<float>(WORLD_W);
         float ny = np.y / static_cast<float>(WORLD_H);
 
@@ -492,6 +525,7 @@ static void UpdateGame()
 
 static void DrawFilledRect(float cx, float cy, float width, float height, unsigned int color)
 {
+    // Scale unit rectangle and move to center (cx,cy)
     AEMtx33 scale;
     AEMtx33Scale(&scale, width, height);
     AEMtx33 translate;
@@ -499,6 +533,7 @@ static void DrawFilledRect(float cx, float cy, float width, float height, unsign
     AEMtx33 m;
     AEMtx33Concat(&m, &translate, &scale);
 
+    // Set render state and ARGB color
     AEGfxSetTransform(m.m);
     AEGfxSetRenderMode(AE_GFX_RM_COLOR);
     AEGfxSetBlendMode(AE_GFX_BM_NONE);
@@ -510,17 +545,20 @@ static void DrawFilledRect(float cx, float cy, float width, float height, unsign
     float b = (color & 0xFF) / 255.0f;
     AEGfxSetColorToMultiply(r, g, b, a);
 
+    // Draw shared rectangle mesh
     if (g_rectMesh)
         AEGfxMeshDraw(g_rectMesh, AE_GFX_MDM_TRIANGLES);
 }
 
 static void DrawArena()
 {
+    // Window bounds
     float minX = AEGfxGetWinMinX();
     float maxX = AEGfxGetWinMaxX();
     float minY = AEGfxGetWinMinY();
     float maxY = AEGfxGetWinMaxY();
 
+    // Solid color rectangles
     AEGfxSetRenderMode(AE_GFX_RM_COLOR);
     AEGfxSetBlendMode(AE_GFX_BM_NONE);
     AEGfxSetTransparency(1.0f);
@@ -528,6 +566,7 @@ static void DrawArena()
     float arenaWidth = maxX - minX;
     float arenaHeight = maxY - minY;
 
+    // Base platform
     float left = minX + arenaWidth * 0.05f;
     float right = maxX - arenaWidth * 0.05f;
     float groundY = minY + arenaHeight * 0.20f;
@@ -538,11 +577,13 @@ static void DrawArena()
 
     DrawFilledRect(baseCx, groundY, baseWidth, platformH, 0xFF808080);
 
+    // Mid platform
     float midY = minY + arenaHeight * 0.35f;
     float midWidth = arenaWidth * 0.50f;
     float midCx = (minX + maxX) * 0.5f;
     DrawFilledRect(midCx, midY, midWidth, platformH, 0xFF707070);
 
+    // Top platforms
     float topY = minY + arenaHeight * 0.60f;
     float topWidth = arenaWidth * 0.25f;
     float topCxL = minX + arenaWidth * 0.25f;
@@ -553,6 +594,7 @@ static void DrawArena()
 
 static void DrawFighters()
 {
+    // Window bounds and render state
     float minX = AEGfxGetWinMinX();
     float maxX = AEGfxGetWinMaxX();
     float minY = AEGfxGetWinMinY();
@@ -574,6 +616,7 @@ static void DrawFighters()
         Fighter& f = g_fighters[i];
         DrawFilledRect(f.x, f.y, width, height, f.color);
 
+        // Health bar above fighter
         if (f.health > 0)
         {
             float hpFrac = static_cast<float>(f.health) / static_cast<float>(PLAYER_MAX_HEALTH);
@@ -592,6 +635,7 @@ static void DrawFighters()
         }
     }
 
+    // If no net players, draw local defaults
     if (!anyActive)
     {
         int localCount = static_cast<int>(g_fighters.size());
@@ -605,6 +649,7 @@ static void DrawFighters()
 
 static void DrawBullets()
 {
+    // Window bounds and render state
     float minX = AEGfxGetWinMinX();
     float maxX = AEGfxGetWinMaxX();
     float minY = AEGfxGetWinMinY();
@@ -617,6 +662,7 @@ static void DrawBullets()
     float width = (maxX - minX) * 0.015f;
     float height = (maxY - minY) * 0.04f;
 
+    // Iterate active bullets, normalize from world to window and draw
     for (int i = 0; i < MAX_BULLETS; ++i)
     {
         if (!g_netBullets[i].active)
@@ -634,21 +680,23 @@ static void DrawFrame()
 {
     static bool s_debugPrinted = false;
 
+    // Clear and draw arena + entities
     AEGfxSetBackgroundColor(0.05f, 0.05f, 0.1f);
     DrawArena();
     DrawFighters();
     DrawBullets();
 
-    // ── HUD: scores + volume bar + lives boxes (gameplay only) ────────────
+    // HUD when gameplay active (not round-over)
     if (g_fontId >= 0 && !g_roundOverActive.load())
     {
         AEGfxSetBlendMode(AE_GFX_BM_BLEND);
 
-        // Scores list (top-left, shifted down)
+        // Scores list (top-left)
         AEGfxPrint(g_fontId, "Scores", -0.95f, 0.70f, 0.6f, 1.0f, 1.0f, 1.0f, 1.0f);
 
         float scoreY = 0.62f;
         {
+            // Lock net state while iterating player scores
             std::lock_guard<std::mutex> lock(g_netStateMtx);
             for (int i = 0; i < MAX_PLAYERS; ++i)
             {
@@ -675,7 +723,7 @@ static void DrawFrame()
             // Background track
             DrawFilledRect(barCx, barCy, barW, barH, 0xFF404040);
 
-            // Filled portion
+            // Filled portion based on g_sfxVolume [0..1]
             float fillW = barW * g_sfxVolume;
             if (fillW > 0.0f)
             {
@@ -687,7 +735,7 @@ static void DrawFrame()
             AEGfxPrint(g_fontId, "Volume", barCx - 0.07f, top + 0.04f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f);
         }
 
-        // Lives boxes (top-right, coloured squares)
+        // Lives boxes (top-right)
         {
             uint8_t lives = 0;
             unsigned int lifeColor = 0xFFFFFFFF;
@@ -706,6 +754,7 @@ static void DrawFrame()
             float w = maxX - minX;
             float h = maxY - minY;
 
+            // Layout parameters
             float boxSize = w * 0.03f;
             float gap     = w * 0.01f;
             float marginX = w * 0.02f;
@@ -737,12 +786,14 @@ static void DrawFrame()
             }
         }
 
+        // Chat prompt while typing
         if (g_chatMode)
         {
             std::string prompt = "> " + g_chatBuf;
             AEGfxPrint(g_fontId, prompt.c_str(), -0.95f, -0.9f, 0.6f, 1.0f, 1.0f, 0.5f, 1.0f);
         }
 
+        // Pre-game prompts
         if (g_joined && !g_gameStarted.load())
         {
             char line[64]{};
@@ -764,6 +815,7 @@ static void DrawFrame()
         }
     }
 
+    // Round-over overlay
     if (g_fontId >= 0 && g_roundOverActive.load())
     {
         AEGfxSetBlendMode(AE_GFX_BM_BLEND);
@@ -789,7 +841,7 @@ static void DrawFrame()
             y -= 0.08f;
         }
 
-        // Top 5 leaderboard – below winners, still top right
+        // Top 5 leaderboard
         y -= 0.05f;
         AEGfxPrint(g_fontId, "Top 5 All-Time", 0.77f, y, 0.75f, 0.2f, 0.9f, 1.0f, 1.0f);
         y -= 0.09f;
@@ -810,6 +862,7 @@ static void DrawFrame()
         AEGfxPrint(g_fontId, "Close the window to exit", -0.30f, 0.85f, 0.65f, 1.0f, 1.0f, 1.0f, 1.0f);
     }
 
+    // One-time debug prints
     if (!s_debugPrinted)
     {
         float minX = AEGfxGetWinMinX();
@@ -830,12 +883,14 @@ static void DrawFrame()
 
 static void SendTo(const void* data, int len)
 {
+    // UDP send wrapper targeting configured server address
     sendto(g_sock, reinterpret_cast<const char*>(data), len, 0,
            reinterpret_cast<const sockaddr*>(&g_serverAddr), sizeof(g_serverAddr));
 }
 
 static void SendJoin()
 {
+    // Construct and send a join request with lobby/display name; server assigns our id
     PktJoin pkt{};
     pkt.hdr.type     = MSG_JOIN;
     pkt.hdr.playerId = 0;
@@ -848,6 +903,7 @@ static void SendJoin()
 
 static void SendStartRequest()
 {
+    // Host presses Enter to request game start once players are connected
     if (!g_joined || g_sock == INVALID_SOCKET)
         return;
     PktStartRequest pkt{};
@@ -860,6 +916,7 @@ static void SendStartRequest()
 
 static void SendInput(uint8_t keys)
 {
+    // Frame input packet: movement/fire bits + current aim angle
     PktInput pkt{};
     pkt.hdr.type     = MSG_INPUT;
     pkt.hdr.playerId = g_myId;
@@ -872,6 +929,7 @@ static void SendInput(uint8_t keys)
 
 static void SendChat(const std::string& text)
 {
+    // Send chat message for server broadcast; ignore empty text
     if (!g_joined || g_sock == INVALID_SOCKET)
         return;
     if (text.empty())
@@ -888,6 +946,7 @@ static void SendChat(const std::string& text)
 
 static void SendQuit()
 {
+    // Inform server of quit before closing socket
     if (!g_joined || g_sock == INVALID_SOCKET)
         return;
 
@@ -901,6 +960,7 @@ static void SendQuit()
 
 static void SendPing()
 {
+    // Latency/keepalive ping with increasing sequence number and client timestamp
     using Clock = std::chrono::steady_clock;
     static std::atomic<uint32_t> s_pingSeq{0};
     PktPing pkt{};
@@ -913,6 +973,7 @@ static void SendPing()
 
 static void RecvThread()
 {
+    // Receive loop: parse message type and update local snapshots/UI state
     char buf[2048];
     sockaddr_in from{};
 
@@ -932,6 +993,7 @@ static void RecvThread()
         case MSG_JOIN_ACK:
         case MSG_REJOIN_ACK:
         {
+            // Server assigns our player id and confirms join
             PktJoinAck ack;
             std::memcpy(&ack, buf, sizeof(PktJoinAck));
             g_myId = ack.assignedId;
@@ -940,15 +1002,18 @@ static void RecvThread()
         }
         case MSG_GAME_STATE:
         {
+            // Full snapshot: players and bullets
             PktGameState gs;
             std::memcpy(&gs, buf, sizeof(PktGameState));
             std::lock_guard<std::mutex> lock(g_netStateMtx);
             g_lastServerTick  = ntohl(gs.gameTick);
             g_gameStarted.store(true);
 
+            // Reset active flags then populate
             for (int i = 0; i < MAX_PLAYERS; ++i) g_netPlayers[i].active = false;
             for (int i = 0; i < MAX_BULLETS; ++i) g_netBullets[i].active = false;
 
+            // Populate player snapshots from fixed-point network values
             for (int i = 0; i < gs.playerCount && i < MAX_PLAYERS; ++i)
             {
                 const PlayerState& ps = gs.players[i];
@@ -965,6 +1030,7 @@ static void RecvThread()
                 np.active = true;
             }
 
+            // Populate bullet snapshots from fixed-point network values
             for (int i = 0; i < gs.bulletCount && i < MAX_BULLETS; ++i)
             {
                 const BulletState& bs = gs.bullets[i];
@@ -974,6 +1040,7 @@ static void RecvThread()
                 nb.active = bs.alive != 0;
             }
 
+            // Update active player count for HUD and pre-game prompts
             int cnt = 0;
             for (int i = 0; i < MAX_PLAYERS; ++i) if (g_netPlayers[i].active) ++cnt;
             g_netPlayerCount = static_cast<uint8_t>(cnt);
@@ -982,6 +1049,7 @@ static void RecvThread()
         }
         case MSG_PLAYER_JOIN:
         {
+            // Chat notification when a player joins
             if (r < static_cast<int>(sizeof(PktPlayerEvent)))
                 break;
 
@@ -1000,6 +1068,7 @@ static void RecvThread()
         }
         case MSG_PLAYER_LEAVE:
         {
+            // Chat notification when a player leaves
             if (r < static_cast<int>(sizeof(PktPlayerEvent)))
                 break;
 
@@ -1018,6 +1087,7 @@ static void RecvThread()
         }
         case MSG_CHAT_BROADCAST:
         {
+            // Append chat text broadcast from server
             if (r < static_cast<int>(sizeof(PktChat)))
                 break;
 
@@ -1030,6 +1100,7 @@ static void RecvThread()
         }
         case MSG_ROUND_OVER:
         {
+            // Round-over summary (winners + leaderboard)
             if (r < static_cast<int>(sizeof(PktRoundOver)))
                 break;
 
@@ -1050,6 +1121,7 @@ static void RecvThread()
 
             g_roundOverActive.store(true);
 
+            // ACK reliable messages to server if needed
             uint16_t seq = ntohs(ro.hdr.seq);
             if (seq != SEQ_UNRELIABLE)
             {
@@ -1072,6 +1144,7 @@ static void RecvThread()
 
 static void PingThread()
 {
+    // Periodically send pings while running to update connectivity
     while (g_netRunning)
     {
         std::this_thread::sleep_for(std::chrono::seconds(2));
@@ -1082,51 +1155,55 @@ static void PingThread()
 
 static void StartNetworking()
 {
-    if (!InitNetworking())
+    // Initialize networking, create UDP socket, bind client port, set timeout, configure server addr, then spawn threads
+    if (!InitNetworking()) // Initialize platform networking (Winsock/BSD); bail out if initialization fails
         return;
 
-    g_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-    if (g_sock == INVALID_SOCKET)
+    g_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP); // Create a UDP socket for client <-> server datagrams
+    if (g_sock == INVALID_SOCKET) // If socket creation fails, abort startup
         return;
 
     sockaddr_in bindAddr{};
-    bindAddr.sin_family      = AF_INET;
-    bindAddr.sin_addr.s_addr = INADDR_ANY;
-    bindAddr.sin_port        = htons(GAME_PORT_CLIENT);
-    bind(g_sock, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr));
+    bindAddr.sin_family      = AF_INET;            // IPv4
+    bindAddr.sin_addr.s_addr = INADDR_ANY;         // Listen on any local interface
+    bindAddr.sin_port        = htons(GAME_PORT_CLIENT); // Client-side port used to receive game packets
+    bind(g_sock, reinterpret_cast<sockaddr*>(&bindAddr), sizeof(bindAddr)); // Bind socket to local port
 
 #ifdef _WIN32
-    DWORD tv = 50;
+    DWORD tv = 50; // Receive timeout in milliseconds to keep recv loop responsive
     setsockopt(g_sock, SOL_SOCKET, SO_RCVTIMEO,
-               reinterpret_cast<const char*>(&tv), sizeof(tv));
+               reinterpret_cast<const char*>(&tv), sizeof(tv)); // Apply recv timeout
 #endif
 
-    g_serverAddr.sin_family = AF_INET;
-    g_serverAddr.sin_port   = htons(GAME_PORT);
-    inet_pton(AF_INET, "127.0.0.1", &g_serverAddr.sin_addr);
+    g_serverAddr.sin_family = AF_INET;             // IPv4
+    g_serverAddr.sin_port   = htons(GAME_PORT);    // Server port
+    inet_pton(AF_INET, "127.0.0.1", &g_serverAddr.sin_addr); // Server address (localhost for development)
 
-    SendJoin();
+    SendJoin(); // Send join request so the server assigns our player ID
 
-    std::thread recvThr(RecvThread);
-    std::thread pingThr(PingThread);
-    recvThr.detach();
+    std::thread recvThr(RecvThread); // Thread that continuously receives and processes server messages
+    std::thread pingThr(PingThread); // Thread that periodically sends pings (keepalive/latency)
+    recvThr.detach(); // Run threads in background (no join on scene shutdown)
     pingThr.detach();
 }
 
 static void StopNetworking()
 {
-    g_netRunning = false;
+    // Signal threads to exit, notify server, close socket, and cleanup
+    g_netRunning = false; // Tell RecvThread/PingThread loops to terminate
     if (g_sock != INVALID_SOCKET)
     {
-        SendQuit();
-        closesocket(g_sock);
-        g_sock = INVALID_SOCKET;
+        SendQuit();            // Inform server we are disconnecting
+        closesocket(g_sock);   // Close UDP socket
+        g_sock = INVALID_SOCKET; // Mark socket as closed
     }
-    CleanupNetworking();
+    CleanupNetworking(); // Tear down platform networking (Winsock/BSD)
 }
 
+// Load assets and create resources used by Level1 (mesh, font, audio)
 void Level1_Load()
 {
+    // Create shared geometry and load font from system path
     CreateRectangleMesh();
     g_fontId = AEGfxCreateFont("C:\\Windows\\Fonts\\arial.ttf", 24);
 
@@ -1137,24 +1214,29 @@ void Level1_Load()
     g_laserSfx = AEAudioLoadSound(laserPath.c_str());
 }
 
+// Initialize local player data and start networking threads
 void Level1_Initialize()
 {
+    // Prepare local visuals and start net threads (join, recv, ping)
     InitPlayers();
     StartNetworking();
 }
 
 void Level1_Update()
 {
+    // Read input and apply latest server snapshots
     UpdateGame();
 }
 
 void Level1_Draw()
 {
+    // Render arena, fighters, bullets, HUD, and round-over view
     DrawFrame();
 }
 
 void Level1_Free()
 {
+    // Release GPU mesh allocated during load
     if (g_rectMesh)
     {
         AEGfxMeshFree(g_rectMesh);
@@ -1164,6 +1246,7 @@ void Level1_Free()
 
 void Level1_Unload()
 {
+    // Destroy font resource and stop networking when leaving scene
     if (g_fontId >= 0)
     {
         AEGfxDestroyFont(g_fontId);
