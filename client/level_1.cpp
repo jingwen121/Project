@@ -149,6 +149,7 @@ static void SendPing();
 static void StartNetworking();
 static void StopNetworking();
 static void SendChat(const std::string& text);
+static void SendQuit();
 
 static void InitPlayers()
 {
@@ -659,6 +660,19 @@ static void SendChat(const std::string& text)
     SendTo(&pkt, sizeof(pkt));
 }
 
+static void SendQuit()
+{
+    if (!g_joined || g_sock == INVALID_SOCKET)
+        return;
+
+    PktHeader pkt{};
+    pkt.type     = MSG_QUIT;
+    pkt.playerId = g_myId;
+    pkt.seq      = htons(SEQ_UNRELIABLE);
+    pkt.timestamp = htonl(g_localTick);
+    SendTo(&pkt, sizeof(pkt));
+}
+
 static void SendPing()
 {
     using Clock = std::chrono::steady_clock;
@@ -868,6 +882,7 @@ static void StopNetworking()
     g_netRunning = false;
     if (g_sock != INVALID_SOCKET)
     {
+        SendQuit();
         closesocket(g_sock);
         g_sock = INVALID_SOCKET;
     }

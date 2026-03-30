@@ -79,6 +79,9 @@ constexpr int32_t FIGHTER_MOVE_SPEED_FP  = 4000;  // horizontal speed per tick
 constexpr int32_t FIGHTER_JUMP_SPEED_FP  = 14000; // initial jump velocity (upward)
 constexpr int32_t FIGHTER_GRAVITY_FP     = 600;   // gravity applied each tick (downward)
 
+constexpr int32_t FIGHTER_HALF_WIDTH_FP  = 20 * FP_SCALE;
+constexpr int32_t FIGHTER_HALF_HEIGHT_FP = 45 * FP_SCALE;
+
 // ── Scoring ──────────────────────────────────────────────────────────────────
 constexpr uint16_t SCORE_PLAYER_HIT      = 0;
 constexpr uint16_t SCORE_PLAYER_KILL     = 1;

@@ -425,9 +425,6 @@ static void EndRound() {
 
 // ── Bullet-player collision ───────────────────────────────────────────────────
 static void CheckBulletPlayerCollisions() {
-    int64_t radSum = SHIP_RADIUS_FP + BULLET_RADIUS_FP;
-    int64_t radSq  = radSum * radSum;
-
     for (auto& bullet : g_bullets) {
         if (!bullet.alive) continue;
 
@@ -435,7 +432,13 @@ static void CheckBulletPlayerCollisions() {
             if (!p.connected || !p.alive) continue;
             if (p.id == bullet.ownerId) continue;
 
-            if (DistSqFP(bullet.x, bullet.y, p.x, p.y) < radSq) {
+            int32_t dx = bullet.x - p.x;
+            if (dx < 0) dx = -dx;
+            int32_t dy = bullet.y - p.y;
+            if (dy < 0) dy = -dy;
+
+            if (dx <= (FIGHTER_HALF_WIDTH_FP + BULLET_RADIUS_FP) &&
+                dy <= (FIGHTER_HALF_HEIGHT_FP + BULLET_RADIUS_FP)) {
                 bullet.alive = false;
 
                 if (p.health > 0) {
@@ -479,7 +482,7 @@ static void CheckBulletPlayerCollisions() {
                             EndRound();
                         }
                     }
-                    return;
+
                 }
 
                 break;
