@@ -433,15 +433,30 @@ static void DrawArena()
     AEGfxSetBlendMode(AE_GFX_BM_NONE);
     AEGfxSetTransparency(1.0f);
 
-    float left = minX + (maxX - minX) * 0.05f;
-    float right = maxX - (maxX - minX) * 0.05f;
-    float groundY = minY + (maxY - minY) * 0.1f;
+    float arenaWidth = maxX - minX;
+    float arenaHeight = maxY - minY;
 
-    float cx = 0.5f * (left + right);
-    float width = right - left;
-    float height = (maxY - minY) * 0.05f;
+    float left = minX + arenaWidth * 0.05f;
+    float right = maxX - arenaWidth * 0.05f;
+    float groundY = minY + arenaHeight * 0.20f;
 
-    DrawFilledRect(cx, groundY, width, height, 0xFF808080);
+    float baseCx = 0.5f * (left + right);
+    float baseWidth = right - left;
+    float platformH = arenaHeight * 0.05f;
+
+    DrawFilledRect(baseCx, groundY, baseWidth, platformH, 0xFF808080);
+
+    float midY = minY + arenaHeight * 0.35f;
+    float midWidth = arenaWidth * 0.50f;
+    float midCx = (minX + maxX) * 0.5f;
+    DrawFilledRect(midCx, midY, midWidth, platformH, 0xFF707070);
+
+    float topY = minY + arenaHeight * 0.60f;
+    float topWidth = arenaWidth * 0.25f;
+    float topCxL = minX + arenaWidth * 0.25f;
+    float topCxR = minX + arenaWidth * 0.75f;
+    DrawFilledRect(topCxL, topY, topWidth, platformH, 0xFF707070);
+    DrawFilledRect(topCxR, topY, topWidth, platformH, 0xFF707070);
 }
 
 static void DrawFighters()

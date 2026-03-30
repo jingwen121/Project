@@ -752,8 +752,18 @@ static void RecvThread() {
 
 // ── Physics update (server-authoritative) ────────────────────────────────────
 static void UpdatePhysics() {
-    const int32_t worldWidthFP  = WORLD_W * FP_SCALE;
-    const int32_t groundYFP     = (WORLD_H * FP_SCALE) / 5;  // fighter center ~20% up so feet sit on platform
+    const int32_t worldWidthFP    = WORLD_W * FP_SCALE;
+    const int32_t groundYFP       = 180 * FP_SCALE;
+    const int32_t groundXMinFP    = 40  * FP_SCALE;
+    const int32_t groundXMaxFP    = 760 * FP_SCALE;
+    const int32_t platformMidYFP  = 270 * FP_SCALE;
+    const int32_t platformMidMinFP = 200 * FP_SCALE;
+    const int32_t platformMidMaxFP = 600 * FP_SCALE;
+    const int32_t platformTopYFP  = 420 * FP_SCALE;
+    const int32_t platformTopLMinFP = 100 * FP_SCALE;
+    const int32_t platformTopLMaxFP = 300 * FP_SCALE;
+    const int32_t platformTopRMinFP = 500 * FP_SCALE;
+    const int32_t platformTopRMaxFP = 700 * FP_SCALE;
 
     for (auto& p : g_players) {
         if (!p.connected) continue;
@@ -770,38 +780,28 @@ static void UpdatePhysics() {
             continue;
         }
 
-        //  if (p.keys & INPUT_ROTATE_LEFT)  p.angle = WrapAngle(p.angle - SHIP_TURN_RATE);
-        // if (p.keys & INPUT_ROTATE_RIGHT) p.angle = WrapAngle(p.angle + SHIP_TURN_RATE);
+        int32_t oldY = p.y;
 
-        // if (p.keys & INPUT_THRUST) {
-        //     float rad = DegToRad(p.angle / 10.0f);
-        //     p.velX += static_cast<int32_t>(std::cos(rad) * SHIP_THRUST_FP);
-        //     p.velY += static_cast<int32_t>(std::sin(rad) * SHIP_THRUST_FP);
-
-        //     float speed = std::sqrt(static_cast<float>(p.velX) * p.velX +
-        //         static_cast<float>(p.velY) * p.velY);
-        //     if (speed > SHIP_MAX_SPEED_FP) {
-        //         float scale = SHIP_MAX_SPEED_FP / speed;
-        //         p.velX = static_cast<int32_t>(p.velX * scale);
-        //         p.velY = static_cast<int32_t>(p.velY * scale);
-        //     }
-        // }
-
-        // p.velX = p.velX * SHIP_FRICTION / 1000;
-        // p.velY = p.velY * SHIP_FRICTION / 1000;
         int32_t moveX = 0;
         if (p.keys & INPUT_ROTATE_LEFT)  moveX -= FIGHTER_MOVE_SPEED_FP;
         if (p.keys & INPUT_ROTATE_RIGHT) moveX += FIGHTER_MOVE_SPEED_FP;
         p.velX = moveX;
 
-        bool onGround = (p.y <= groundYFP);
-        if (onGround) {
-            p.y = groundYFP;
-            if (p.velY < 0) p.velY = 0;
-        }
+        bool onSurface = false;
+        if (oldY == groundYFP && p.x >= groundXMinFP && p.x <= groundXMaxFP)
+            onSurface = true;
+        if (oldY == platformMidYFP && p.x >= platformMidMinFP && p.x <= platformMidMaxFP)
+            onSurface = true;
+        if (oldY == platformTopYFP &&
+            ((p.x >= platformTopLMinFP && p.x <= platformTopLMaxFP) ||
+             (p.x >= platformTopRMinFP && p.x <= platformTopRMaxFP)))
+            onSurface = true;
 
-        if (onGround && (p.keys & INPUT_THRUST)) {
-            p.velY = +FIGHTER_JUMP_SPEED_FP;
+        if (onSurface) {
+            if (p.velY < 0) p.velY = 0;
+            if (p.keys & INPUT_THRUST) {
+                p.velY = +FIGHTER_JUMP_SPEED_FP;
+            }
         }
 
         p.velY -= FIGHTER_GRAVITY_FP;
@@ -838,10 +838,21 @@ static void UpdatePhysics() {
             }
         }
 
-        // p.x = WrapFP(p.x + p.velX, WORLD_W * FP_SCALE);
-        // p.y = WrapFP(p.y + p.velY, WORLD_H * FP_SCALE);
         p.x += p.velX;
         p.y += p.velY;
+
+        auto LandOn = [&](int32_t surfY, int32_t minX, int32_t maxX) {
+            if (oldY >= surfY && p.y <= surfY && p.velY <= 0 &&
+                p.x >= minX && p.x <= maxX) {
+                p.y = surfY;
+                if (p.velY < 0) p.velY = 0;
+            }
+        };
+
+        LandOn(platformTopYFP, platformTopLMinFP, platformTopLMaxFP);
+        LandOn(platformTopYFP, platformTopRMinFP, platformTopRMaxFP);
+        LandOn(platformMidYFP, platformMidMinFP, platformMidMaxFP);
+        LandOn(groundYFP, groundXMinFP, groundXMaxFP);
 
         if (p.x < 0) p.x = 0;
         if (p.x > worldWidthFP) p.x = worldWidthFP;
