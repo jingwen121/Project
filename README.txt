@@ -4,79 +4,85 @@
 
 OVERVIEW
 --------
-A multiplayer 2-4 player fighting game over UDP using a Client-Server
-architecture. All game logic runs on the server; clients send inputs
-and render the authoritative state.
+A multiplayer 2–4 player fighting game over UDP using a Client–Server
+architecture. The server is authoritative; clients send inputs and
+render the state snapshots.
+
+Features
+--------
+- Level 1 (level_1.cpp) runs the current game (HUD + chat + volume bar)
+- Lives HUD (top-right) and health bars
+- Round Over screen: winners + Top 5 all-time (with datetime)
+- Laser SFX (Assets\Audio\laser.wav) + adjustable volume slider (top-middle)
+- Reliable messages with ACK for round over events
 
 NOTE
 ----
-This build is intended to be run in Visual Studio as Release | x64.
-The Alpha Engine DLLs and Assets are copied next to Clients.exe during
-the post-build step.
+Build and run in Visual Studio as Release | x64 or Debug | x64.
+Assets and DLLs are copied next to Clients.exe via post-build steps.
 
 CONTROLS (in-game)
 ------------------
-  A/D or Left/Right    - Move
-  Click or Space       - Shoot
+  A/D or Left/Right - Move
+  Space / Left Mouse - Shoot
+  T                  - Chat mode (Enter to send, ESC to cancel)
+  +/-                - Adjust SFX volume (also draggable slider top-middle)
 
 HUD
 ---
-  - Live scores are shown during gameplay.
-  - Your remaining lives are shown as 3 colored boxes at the top-right.
+  - Live scores (top-left)
+  - Lives (top-right): 3 colored boxes for local player
+  - Volume bar (top-middle): dark grey track + white fill; click/drag to set volume
 
 SCORING
 -------
-  - Score is server-authoritative and is based on player kills.
+  - Server-authoritative; 1 point per kill
 
 LEADERBOARD
 -----------
-  - Top 5 all-time scores are saved to leaderboard.bin and shown at the
-    end of the round (with date/time).
-  - To clear history: close Servers.exe and delete leaderboard.bin in the
-    server working directory.
+  - Top 5 all-time saved to leaderboard.bin; displayed at round end with datetime
+  - To clear: close Servers.exe and delete leaderboard.bin in the server working directory
 
 ----------------------------------------------------------------------
 HOW TO BUILD (Visual Studio 2022)
 ----------------------------------------------------------------------
 
 1) Open Project.sln
-2) Select: Release | x64
+2) Select: Release | x64 (or Debug | x64)
 3) Build -> Build Solution
 
 Outputs
 -------
-  - Clients.exe: bin\Release-x64\Clients.exe
-  - Servers.exe: build output for the Servers project (run from Visual Studio
-    or locate the generated Servers.exe in the solution output folders).
+  - Clients.exe: bin\<Config>-x64\Clients.exe
+  - Servers.exe: built from Servers project (set as Startup Project to run)
 
 ----------------------------------------------------------------------
 HOW TO RUN (LOCAL TEST)
 ----------------------------------------------------------------------
 
-1) Start the server first (Release | x64)
-   - In Visual Studio: set Servers as Startup Project -> Ctrl+F5
-   - Or run Servers.exe directly
+Server
+  - Set Servers as Startup Project -> Ctrl+F5
+  - Or run built Servers.exe directly
 
-2) Start 2-3 clients (Release | x64)
-   - Run Clients.exe multiple times to create multiple players.
+Client
+  - Set Clients as Startup Project -> Ctrl+F5
+  - Or run built Clients.exe from bin\<Config>-x64\
+  - Assets must exist at bin\<Config>-x64\Assets\Audio\laser.wav
 
-Notes
------
-  - Clients currently connect to 127.0.0.1 (same machine).
-  - leaderboard.bin is created in the server working directory.
-    Delete it to clear the Top 5 history.
+LAN
+  - Clients connect to 127.0.0.1 by default; for LAN, change to server LAN IP in code or config.
 
 ----------------------------------------------------------------------
 TECH NOTES
 ----------------------------------------------------------------------
 
 Network
-  - Pure UDP (see protocol in common/game_protocol.h)
-  - Client-Server topology; server is authoritative
+  - Pure UDP, client–server
+  - Reliable ACK for round-over events
 
 Gameplay
-  - Players can move and shoot.
-  - Lives: each player has multiple lives; eliminated players stop rendering.
-  - Round over screen shows winners + Top 5 all-time leaderboard.
+  - Level 1 (level_1.cpp) contains HUD, chat, volume bar, lives boxes
+  - Sound effect loaded relative to executable path (Assets\Audio\laser.wav)
+  - Round Over shows winners + Top 5 all-time
 
-----------------------------------------------------------------------
+
