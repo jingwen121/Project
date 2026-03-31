@@ -43,14 +43,7 @@ inline int64_t DistSqFP(int32_t ax, int32_t ay, int32_t bx, int32_t by) {
     return dx * dx + dy * dy;
 }
 
-// ── Collision radius per asteroid size (in FP units) ────────────────────────
-inline int32_t AsteroidRadiusFP(uint8_t size) {
-    // size: 3=large(30px), 2=medium(20px), 1=small(10px)
-    return static_cast<int32_t>(size) * 10 * FP_SCALE;
-}
-
-// ── Ship collision radius ────────────────────────────────────────────────────
-constexpr int32_t SHIP_RADIUS_FP   = 12 * FP_SCALE;
+// ── Bullet collision radius ─────────────────────────────────────────────────
 constexpr int32_t BULLET_RADIUS_FP = 3 * FP_SCALE;
 
 // ── Fighter health/damage (logical units, not FP) ────────────────────────────

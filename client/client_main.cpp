@@ -74,13 +74,6 @@ struct ClientPlayer {
     bool     active = false;
 };
 
-struct ClientAsteroid {
-    float   x = 0, y = 0;
-    uint8_t size = 0;
-    bool    alive = false;
-    uint8_t id = 0;
-};
-
 struct ClientBullet {
     float   x = 0, y = 0;
     uint8_t ownerId = 0;
@@ -88,10 +81,8 @@ struct ClientBullet {
 };
 
 static std::array<ClientPlayer, MAX_PLAYERS>   g_players{};
-static std::array<ClientAsteroid, MAX_ASTEROIDS> g_asteroids{};
 static std::array<ClientBullet, MAX_BULLETS>   g_bullets{};
 static uint8_t g_playerCount = 0;
-static uint8_t g_asteroidCount = 0;
 static uint8_t g_bulletCount = 0;
 
 // Scores shown in HUD
@@ -227,12 +218,6 @@ static void DrawShip(float x, float y, float angleDeg, bool isMe, char label) {
     PutChar(nx, ny, isMe ? '*' : '.');
 }
 
-// ── Draw asteroid ─────────────────────────────────────────────────────────────
-static void DrawAsteroid(float x, float y, uint8_t size) {
-    char c = (size == 3) ? 'O' : (size == 2) ? 'o' : '.';
-    PutChar(static_cast<int>(x), static_cast<int>(y), c);
-}
-
 // ── Draw bullet ──────────────────────────────────────────────────────────────
 static void DrawBullet(float x, float y) {
     PutChar(static_cast<int>(x), static_cast<int>(y), '-');
@@ -272,10 +257,6 @@ static void RenderLoop() {
             }
 
             // Draw entities
-            for (int i = 0; i < g_asteroidCount; ++i) {
-                auto& a = g_asteroids[i];
-                if (a.alive) DrawAsteroid(a.x, a.y, a.size);
-            }
             for (int i = 0; i < g_bulletCount; ++i) {
                 auto& b = g_bullets[i];
                 if (b.alive) DrawBullet(b.x, b.y);
@@ -420,7 +401,6 @@ static void RecvThread() {
             std::lock_guard<std::mutex> lock(g_stateMtx);
             g_lastServerTick  = ntohl(gs.gameTick);
             g_playerCount     = gs.playerCount;
-            g_asteroidCount   = gs.asteroidCount;
             g_bulletCount     = gs.bulletCount;
 
             for (int i = 0; i < gs.playerCount; ++i) {
@@ -436,17 +416,6 @@ static void RecvThread() {
                 cp.active = true;
             }
             for (int i = gs.playerCount; i < MAX_PLAYERS; ++i) g_players[i].active = false;
-
-            for (int i = 0; i < gs.asteroidCount; ++i) {
-                auto& as = gs.asteroids[i];
-                auto& ca = g_asteroids[i];
-                ca.id    = as.id;
-                ca.x     = static_cast<float>(static_cast<int32_t>(ntohl(as.x))) / FP_SCALE;
-                ca.y     = static_cast<float>(static_cast<int32_t>(ntohl(as.y))) / FP_SCALE;
-                ca.size  = as.size;
-                ca.alive = as.alive != 0;
-            }
-            for (int i = gs.asteroidCount; i < MAX_ASTEROIDS; ++i) g_asteroids[i].alive = false;
 
             for (int i = 0; i < gs.bulletCount; ++i) {
                 auto& bs = gs.bullets[i];
@@ -470,17 +439,6 @@ static void RecvThread() {
                 g_scores[i].score = ntohs(su.entries[i].score);
                 strncpy_s(g_scores[i].name, sizeof(g_scores[i].name), su.entries[i].name, _TRUNCATE);
             }
-            break;
-        }
-
-        case MSG_ASTEROID_DEAD: {
-            PktAsteroidDead ad;
-            std::memcpy(&ad, buf, sizeof(PktAsteroidDead));
-            std::lock_guard<std::mutex> lock(g_stateMtx);
-            for (auto& a : g_asteroids) {
-                if (a.id == ad.asteroidId) { a.alive = false; break; }
-            }
-            // ACK is sent at top of loop via seq != SEQ_UNRELIABLE check
             break;
         }
 

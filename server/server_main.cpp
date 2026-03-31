@@ -5,11 +5,11 @@
 \par email: TODO
 \date 27 Mar, 2026
 \brief
-  Authoritative game server for the Spaceships multiplayer LAN game.
-  - Pure UDP (required for options 1/2).
+  Authoritative game server for the multiplayer fighting game over UDP.
+  - Pure UDP.
   - Client-Server architecture.
   - Handles up to MAX_PLAYERS clients simultaneously.
-  - Lock-step ACK for critical events (asteroid destruction, round-over).
+  - Lock-step ACK for critical events (round-over).
   - Persists top-5 leaderboard to disk.
   - Graceful disconnect: other players continue when one drops.
   - Reconnect support: rejoining client receives full state.
@@ -64,17 +64,9 @@ struct ServerPlayer {
     uint32_t    respawnTick = 0;
     uint8_t     keys = 0;
     uint32_t    lastSeenTick = 0;
-    bool        ackedAsteroidDead = false;
     bool        ackedRoundOver = false;
 };
 
-struct ServerAsteroid {
-    uint8_t  id = 0;
-    int32_t  x = 0, y = 0;
-    int32_t  velX = 0, velY = 0;
-    uint8_t  size = 0;
-    bool     alive = false;
-};
 
 struct ServerBullet {
     uint8_t  id = 0;
@@ -88,7 +80,7 @@ struct ServerBullet {
 static SOCKET g_sock = INVALID_SOCKET;
 static std::mutex g_mtx;
 static std::array<ServerPlayer, MAX_PLAYERS> g_players{};
-static std::array<ServerAsteroid, MAX_ASTEROIDS> g_asteroids{};
+
 static std::array<ServerBullet, MAX_BULLETS> g_bullets{};
 static GamePhase g_phase = GamePhase::WAITING;
 static uint32_t g_tick = 0;
@@ -261,20 +253,7 @@ static void UpdateLeaderboard(const char* playerName, uint16_t score) {
     }
 }
 
-// ── Asteroid helpers ──────────────────────────────────────────────────────────
-static uint8_t NextAsteroidId() {
-    for (uint8_t i = 1; i <= MAX_ASTEROIDS; ++i) {
-        bool used = false;
-        for (auto& a : g_asteroids) {
-            if (a.alive && a.id == i) {
-                used = true;
-                break;
-            }
-        }
-        if (!used) return i;
-    }
-    return 0;
-}
+// ── Bullet helpers ──────────────────────────────────────────────────────────
 
 static uint8_t NextBulletId() {
     for (uint8_t i = 1; i <= MAX_BULLETS; ++i) {
@@ -290,12 +269,6 @@ static uint8_t NextBulletId() {
     return 0;
 }
 
-static ServerAsteroid* GetFreeAsteroidSlot() {
-    for (auto& a : g_asteroids) {
-        if (!a.alive) return &a;
-    }
-    return nullptr;
-}
 
 static ServerBullet* GetFreeBulletSlot() {
     for (auto& b : g_bullets) {
@@ -304,38 +277,7 @@ static ServerBullet* GetFreeBulletSlot() {
     return nullptr;
 }
 
-static void SpawnAsteroid(uint8_t size, int32_t x, int32_t y, int32_t vx, int32_t vy) {
-    ServerAsteroid* slot = GetFreeAsteroidSlot();
-    if (!slot) return;
 
-    uint8_t id = NextAsteroidId();
-    if (!id) return;
-
-    slot->id = id;
-    slot->size = size;
-    slot->x = x;
-    slot->y = y;
-    slot->velX = vx;
-    slot->velY = vy;
-    slot->alive = true;
-
-    PktAsteroidSpawn pkt{};
-    pkt.hdr.type = MSG_ASTEROID_SPAWN;
-    pkt.hdr.playerId = 0;
-    pkt.hdr.seq = htons(NextSeq());
-    pkt.hdr.timestamp = htonl(g_tick);
-    pkt.ast.id = id;
-    pkt.ast.size = size;
-    pkt.ast.alive = 1;
-    pkt.ast.x = htonl(x);
-    pkt.ast.y = htonl(y);
-    pkt.ast.velX = htons(static_cast<uint16_t>(vx));
-    pkt.ast.velY = htons(static_cast<uint16_t>(vy));
-    Broadcast(&pkt, sizeof(pkt));
-}
-
-static void SpawnInitialAsteroids() {
-}
 
 static void SetSpawnPosition(ServerPlayer& p) {
     const int32_t groundYFP         = 180 * FP_SCALE;
@@ -558,11 +500,6 @@ static void CheckBulletPlayerCollisions() {
     }
 }
 
-static void CheckBulletAsteroidCollisions() {
-}
-
-static void CheckShipAsteroidCollisions() {
-}
 
 // ── Game state broadcast ──────────────────────────────────────────────────────
 static void BroadcastGameState() {
@@ -591,7 +528,6 @@ static void BroadcastGameState() {
     }
     pkt.playerCount = static_cast<uint8_t>(pi);
 
-    pkt.asteroidCount = 0;
 
     int bi = 0;
     for (auto& b : g_bullets) {

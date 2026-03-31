@@ -56,7 +56,6 @@ inline void CleanupNetworking() {
 constexpr uint16_t GAME_PORT          = 9000; // default UDP port (overridable via config)
 constexpr uint16_t GAME_PORT_CLIENT   = 9001; // each client also binds its own port
 constexpr int      MAX_PLAYERS        = 6;    // assignment allows groups of 1-6
-constexpr int      MAX_ASTEROIDS      = 32;
 constexpr int      MAX_BULLETS        = 64;
 constexpr int      LEADERBOARD_SIZE   = 5;
 
@@ -74,10 +73,8 @@ enum MsgType : uint8_t {
     MSG_JOIN_ACK    = 0x10, // server accepts join, assigns player ID
     MSG_JOIN_DENY   = 0x11, // server rejects join (full / wrong state)
     MSG_GAME_STATE  = 0x12, // full authoritative game snapshot
-    MSG_ASTEROID_SPAWN  = 0x13, // new asteroid (server-authoritative position)
-    MSG_ASTEROID_DEAD   = 0x14, // asteroid destroyed – requires ACK (lock-step)
     MSG_BULLET_SPAWN    = 0x15, // bullet fired
-    MSG_PLAYER_DEAD     = 0x16, // a player's ship was destroyed
+    MSG_PLAYER_DEAD     = 0x16, // a player was defeated
     MSG_PLAYER_JOIN     = 0x17, // another player joined (broadcast)
     MSG_PLAYER_LEAVE    = 0x18, // a player left (broadcast)
     MSG_SCORE_UPDATE    = 0x19, // live score table
@@ -89,7 +86,7 @@ enum MsgType : uint8_t {
 };
 
 // ── Reliability sequence numbers ─────────────────────────────────────────────
-//  Only critical events (asteroid death, round-over) use the seq/ack scheme.
+//  Only critical events (e.g., round-over) use the seq/ack scheme.
 //  Regular state updates are fire-and-forget (most-recent wins).
 constexpr uint16_t SEQ_UNRELIABLE = 0xFFFF; // marker: no ACK expected
 
@@ -160,17 +157,6 @@ struct PlayerState {
     char     name[16];
 };
 
-// ── Per-asteroid state ────────────────────────────────────────────────────────
-struct AsteroidState {
-    uint8_t  id;
-    int32_t  x;
-    int32_t  y;
-    int16_t  velX;
-    int16_t  velY;
-    uint8_t  size; // 3=large, 2=medium, 1=small
-    uint8_t  alive;
-};
-
 // ── Per-bullet state ─────────────────────────────────────────────────────────
 struct BulletState {
     uint8_t  id;
@@ -187,27 +173,9 @@ struct PktGameState {
     PktHeader    hdr;
     uint32_t     gameTick;                      // server tick (network byte order)
     uint8_t      playerCount;
-    uint8_t      asteroidCount;
     uint8_t      bulletCount;
     PlayerState  players[MAX_PLAYERS];
-    AsteroidState asteroids[MAX_ASTEROIDS];
     BulletState  bullets[MAX_BULLETS];
-};
-
-// ── MSG_ASTEROID_SPAWN ───────────────────────────────────────────────────────
-struct PktAsteroidSpawn {
-    PktHeader    hdr;
-    AsteroidState ast; // seq in hdr is reliable – client must ACK
-};
-
-// ── MSG_ASTEROID_DEAD ─────────────────────────────────────────────────────────
-//  Critical: server holds off removing asteroid until ACK received from all
-//  connected clients (lock-step for destruction).
-struct PktAsteroidDead {
-    PktHeader hdr;       // seq != SEQ_UNRELIABLE → client must send MSG_ACK
-    uint8_t   asteroidId;
-    uint8_t   killerPlayerId;
-    uint16_t  points;    // points awarded (network byte order)
 };
 
 // ── MSG_BULLET_SPAWN ─────────────────────────────────────────────────────────
